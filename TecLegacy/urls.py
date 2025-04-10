@@ -27,6 +27,7 @@ urlpatterns = [
     path('users/', include('users.urls')),
     path('cart/', include('cart.urls')),
     path('chatbot/', include('chatbot.urls')),
+
 ]
 
 # Añadir estas líneas para servir archivos media durante desarrollo

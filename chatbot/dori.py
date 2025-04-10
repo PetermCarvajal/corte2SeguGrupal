@@ -8,6 +8,6 @@ chatbot = ChatBot(
     database="db.sqlite3"  # Puedes cambiar el nombre si quieres
 )
 
-# 🔥 Borrar todo lo que ya aprendió (reiniciar el entrenamiento)
+# 🔥 Borrar todo lo que ya aprendió (reiniciar el management)
 chatbot.storage.drop()
 

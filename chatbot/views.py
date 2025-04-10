@@ -1,86 +1,405 @@
+from spacy.lang.es.stop_words import STOP_WORDS as spacy_stop_words
+from django.http import JsonResponse, HttpResponseRedirect # Necesario para redirect
 from django.views.decorators.csrf import csrf_exempt
-from chatterbot import ChatBot
-from chatterbot.trainers import ChatterBotCorpusTrainer
-from .entrenar import trainer
+from django.shortcuts import redirect # Más directo para redirecciones
 from django.http import JsonResponse
-from products.models import Category
-from django.urls import reverse
-import re
-import json
-import nltk
-import spacy
-from spacy.lang.es.stop_words import STOP_WORDS
-from unidecode import unidecode
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-import torch
+from urllib.parse import quote_plus
+from django.shortcuts import render
 from nltk.corpus import wordnet
-from itertools import chain
-import os
 from django.urls import reverse
-from products.models import Product, Category
+from unidecode import unidecode
+from django.db.models import Q
+from chatterbot import ChatBot
 from django.db import models
+from itertools import chain
+import traceback
+import datetime # Para logging con timestamp
+import random # Para variar respuestas
+import spacy
+import nltk
+import json
+import re
+import os
 
+ # ! error
+#
+## ##########################################
+##      CONFIGURACIÓN INICIAL Y GLOBALES
+## ##########################################
+#
+## --- Carga de Modelo Spacy ---
+#NLP_MODEL_NAME = "es_core_news_sm"
+#try: #2
+#    nlp = spacy.load(NLP_MODEL_NAME)
+#except OSError:
+#    print(f"Modelo Spacy '{NLP_MODEL_NAME}' no encontrado. Intentando descargar...")
+#    try:
+#        spacy.cli.download(NLP_MODEL_NAME)
+#        import importlib
+#        module = importlib.import_module(NLP_MODEL_NAME)
+#        nlp = module.load()
+#        print(f"Modelo '{NLP_MODEL_NAME}' descargado y cargado.")
+#    except Exception as e:
+#        print(f"FATAL: Error al descargar/cargar modelo Spacy '{NLP_MODEL_NAME}': {e}")
+#        nlp = None
+#if not nlp:
+#     print("⚠️ADVERTENCIA: El modelo NLP de Spacy no está cargado. Funcionalidades como extracción de palabras clave fallarán.")
+#
+#
+## --- Vocabulario y Constantes ---
 
-# ========== NLP SETUP ==========
+## ##########################################
+##          FUNCIONES HELPER
+## ##########################################
+#
+## --- Función de Logging (Requisito 1) ---
+
+#def extraer_palabras_clave(texto_usuario): #20 (Extractor de Keywords - Mejorado)
+#    """
+#    Limpia la consulta del usuario para extraer solo las palabras clave
+#    relevantes para la búsqueda de productos o categorías.
+#    Asume que el texto ya pasó por corregir_con_regex.
+#    """
+#    global nlp # Asegúrate de que 'nlp' esté cargado (ej: spacy.load('es_core_news_sm'))
+#    if not nlp or not texto_usuario or not isinstance(texto_usuario, str):
+#        return ""
+#
+#    texto_limpio = unidecode(texto_usuario.lower())
+#    doc = nlp(texto_limpio)
+#
+#    palabras_clave = [
+#        token.lemma_ for token in doc
+#        if not token.is_punct and not token.is_space and
+#           token.lemma_ not in PALABRAS_A_IGNORAR and
+#           token.text not in PALABRAS_A_IGNORAR
+#    ]
+#    return " ".join(palabras_clave).strip()
+#
+#def detectar_intencion(texto): #22 (Detector Intención Básica - Mejorado)
+#    """Detecta intenciones básicas (saludo, despedida, envío, ayuda)."""
+#    if not texto or not isinstance(texto, str):
+#        return "intencion_desconocida"
+#
+#    texto_normalizado = unidecode(corregir_con_regex(texto, correcciones).lower())
+#
+#    if any(saludo in texto_normalizado for saludo in SALUDOS):
+#        return "saludo"
+#    if any(despedida in texto_normalizado for despedida in DESPEDIDAS):
+#        return "despedida"
+#    if any(ayuda in texto_normalizado for ayuda in AYUDA):
+#        return "ayuda"
+#    if es_pregunta_envio(texto_normalizado): # Usar función específica para envíos
+#        return "pregunta_envio"
+#
+#    return "intencion_desconocida" # Por defecto
+#
+
+# ! da error
+#def generar_respuesta_con_links(products, max_price=None):  # 27 (Generador HTML links - Mejorado)
+#    """Formatea respuesta HTML con enlaces a productos."""
+#    # Requisito 3: Lenguaje Natural
+#    intros = [
+#        "He encontrado estos productos que podrían interesarte:<br>",
+#        "Aquí tienes algunos productos relacionados con tu búsqueda:<br>",
+#        "¡Claro! Echa un vistazo a estos:<br>",
+#        "Estos productos coinciden con lo que buscas:<br>"
+#    ]
+#    intro_precio = [
+#        f"Encontré estos productos por menos de ${max_price:<,.0f}:<br>",
+#        f"Aquí tienes opciones por debajo de ${max_price:<,.0f}:<br>"
+#    ]
+#
+#    response = random.choice(intro_precio) if max_price is not None else random.choice(intros)
+#
+#    for product in products:
+#        try:
+#            product_url = reverse('products:product_detail', args=[product.category.slug, product.slug])
+#            price_formatted = '{:,.0f}'.format(product.price).replace(',', '.')
+#            response += f"• <a href='{product_url}' target='_blank'>{product.name}</a> (${price_formatted})<br>"  # Abrir en nueva pestaña
+#        except Exception as e:
+#            print(f"Error generando URL para {product.slug}: {e}")
+#            price_formatted = '{:,.0f}'.format(product.price).replace(',', '.')
+#            response += f"• {product.name} (${price_formatted}) [Error enlace]<br>"
+#
+#    if products.count() >= 5:
+#        response += "<br>Estos son solo algunos. ¡Si no es lo que buscas, dime más detalles!"
+#    elif not products.exists():  # Seguridad, aunque no debería llegar aquí
+#        return "Vaya, parece que no encontré productos exactos para eso."
+#
+#    return response
+# ! arriba
+#
+#def responder_usuario(texto_corregido):  # 28 (Manejador Conversación Específica - Mejorado)
+#    """Maneja intenciones conversacionales básicas y predefinidas."""
+#    intencion = detectar_intencion(texto_corregido)
+#
+#    # Requisito 3: Lenguaje Natural (Respuestas variadas)
+#    if intencion == "saludo":
+#        respuestas = ["¡Hola! 👋 Bienvenido a TecLegacy. ¿Qué buscas hoy?", "¡Qué tal! 😊 ¿En qué puedo ayudarte?",
+#                      "¡Buenas! Listo para ayudarte a encontrar lo mejor en tecnología.",
+#                      "¡Hola! Dime qué producto tienes en mente."]
+#        return random.choice(respuestas)
+#    elif intencion == "despedida":
+#        respuestas = ["¡Hasta luego! Gracias por visitarnos. Vuelve pronto 😊", "¡Chao! Que tengas un excelente día.",
+#                      "¡Nos vemos! Si necesitas algo más, aquí estaré.", "¡Adiós! Espero haberte ayudado."]
+#        return random.choice(respuestas)
+#    elif intencion == "ayuda":
+#        respuestas = [
+#            "Soy tu asistente virtual en TecLegacy. Puedo buscar productos, categorías o ayudarte con preguntas sobre envíos. ¿Qué necesitas?",
+#            "¡Claro! Pregúntame por un producto (ej: 'laptop gamer Asus') o sobre nuestros envíos (ej: 'envían a Medellín?').",
+#            "Estoy aquí para ayudarte. Dime qué buscas o si tienes dudas sobre envíos."]
+#        return random.choice(respuestas)
+#    elif intencion == "pregunta_envio":
+#        pais_detectado = detectar_pais_en_mensaje(texto_corregido)
+#        if pais_detectado and pais_detectado != "colombia":
+#            pais_title = pais_detectado.title()
+#            return f"Qué pena, por ahora nuestros envíos son sólo dentro de Colombia 🇨🇴. No podemos enviar a {pais_title}."
+#        else:
+#            # Asumir Colombia si no se especifica otro país
+#            return "¡Sí! Hacemos envíos a toda Colombia 🇨🇴. ¡Anímate a comprar! ✈️📦"
+#    # Se podría añadir manejo para 'chiste' u otras intenciones básicas aquí
+#
+#    return None
+#
+## --- Vista del Chatbot (POST) ---
+#@csrf_exempt
+#def chatbot_query(request):
+#    """Maneja las consultas enviadas al widget del chatbot."""
+#    if request.method == 'POST':
+#        try:
+#            data = json.loads(request.body)
+#            query = data.get('query', '').strip()
+#
+#            # === REQUISITO 1: Registrar input del chatbot ===
+#            log_user_input(query, 'CHATBOT')
+#
+#            if not query: return JsonResponse({'success': True, 'response': "¿Disculpa? No recibí tu mensaje.", 'type': 'text'}) # Respuesta para query vacía
+#
+#            # 1. Corregir
+#            query_corregida = corregir_con_regex(query, correcciones)
+#
+#            # 2. Extraer Keywords
+#            palabras_clave_str = extraer_palabras_clave(query_corregida)
+#            print(f"[CHATBOT] Original: '{query}' | Corregida: '{query_corregida}' | Claves: '{palabras_clave_str}'")
+#
+#            respuesta_encontrada = None
+#            respuesta_tipo = 'text'
+#
+#            # 3. Intenciones Estáticas/Navegación
+#            if query_corregida in INTENCIONES["inicio"]: respuesta_encontrada, respuesta_tipo = reverse("products:index"), 'url'
+#            elif query_corregida in INTENCIONES["productos"]: respuesta_encontrada, respuesta_tipo = reverse("products:product_list"), 'url'
+#            elif query_corregida in INTENCIONES["login"]:
+#                 try: respuesta_encontrada, respuesta_tipo = reverse("login"), 'url'
+#                 except Exception: respuesta_encontrada, respuesta_tipo = "Puedes iniciar sesión o registrarte desde el menú superior.", 'text'
+#            if respuesta_encontrada: return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
+#
+#            # 4. Buscar Productos (BD)
+#            if not respuesta_encontrada and palabras_clave_str:
+#                productos, max_p = obtener_productos_desde_query(palabras_clave_str)
+#                if productos and productos.exists():
+#                    respuesta_encontrada, respuesta_tipo = generar_respuesta_con_links(productos, max_p), 'html'
+#                    return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
+#
+#            # 5. Buscar Categoría Exacta (BD)
+#            if not respuesta_encontrada and palabras_clave_str and Category and Category.objects:
+#                try:
+#                    # Busca una categoría cuyo nombre normalizado sea IGUAL a las palabras clave
+#                    categoria_encontrada = Category.objects.filter(name__iexact=palabras_clave_str).first()
+#                    if not categoria_encontrada: # Intenta quitando tildes si no encontró exacto
+#                         categoria_encontrada = next((cat for cat in Category.objects.all() if unidecode(cat.name.lower()) == unidecode(palabras_clave_str)), None)
+#
+#                    if categoria_encontrada:
+#                        cat_url = reverse("products:products_by_category", args=[categoria_encontrada.slug])
+#                        respuesta_encontrada = f"¡Claro! Aquí tienes todo sobre <a href='{cat_url}' target='_blank'>{categoria_encontrada.name}</a>."
+#                        respuesta_tipo = 'html'
+#                        return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
+#                except Exception as e_cat: print(f"Error buscando categoría exacta: {e_cat}")
+#
+#            # 6. Intenciones Conversacionales Específicas
+#            if not respuesta_encontrada:
+#                respuesta_conv_esp = responder_usuario(query_corregida)
+#                if respuesta_conv_esp:
+#                    respuesta_encontrada, respuesta_tipo = respuesta_conv_esp, 'text'
+#                    return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
+#
+#            # 7. Conversación General (ChatterBot)
+#            if not respuesta_encontrada:
+#                try:
+#                    response_cb = chatbot.get_response(query_corregida)
+#                    CONFIDENCE_THRESHOLD = 0.50 # Umbral de confianza (ajustar)
+#                    if response_cb and response_cb.confidence >= CONFIDENCE_THRESHOLD:
+#                        respuesta_encontrada, respuesta_tipo = str(response_cb), 'text'
+#                        print(f"[CHATBOT] Respuesta ChatterBot (Conf: {response_cb.confidence:.2f})")
+#                        return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
+#                    else: print(f"[CHATBOT] ChatterBot baja confianza ({response_cb.confidence if response_cb else 'N/A'})")
+#                except Exception as e_cb: print(f"Error con ChatterBot: {e_cb}")
+#
+#            # 8. Fallback Final (Link a Búsqueda General)
+#            if not respuesta_encontrada:
+#                termino_busqueda_url = palabras_clave_str if palabras_clave_str else query_corregida
+#                if not termino_busqueda_url: termino_busqueda_url = query
+#                try:
+#                    search_url = f"{reverse('products:search')}?q={quote_plus(termino_busqueda_url)}"
+#                    respuestas_fallback = [
+#                        f"Hmm, no encontré algo específico para '{query}'. ¿Qué tal si pruebas <a href='{search_url}' target='_blank'>buscar '{termino_busqueda_url}' en la tienda</a>?",
+#                        f"No estoy seguro sobre '{query}'. Puedes <a href='{search_url}' target='_blank'>ver los resultados para '{termino_busqueda_url}' aquí</a> o reformular tu pregunta.",
+#                        f"Para '{query}', te sugiero <a href='{search_url}' target='_blank'>usar la búsqueda general con '{termino_busqueda_url}'</a>."
+#                    ]
+#                    respuesta_encontrada = random.choice(respuestas_fallback)
+#                    respuesta_tipo = 'html'
+#                    guardar_pregunta_desconocida(query)
+#                    print(f"[CHATBOT] Fallback a búsqueda: Termino '{termino_busqueda_url}'")
+#                    return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
+#                except Exception as e_search:
+#                    print(f"Error generando URL fallback: {e_search}")
+#                    respuesta_encontrada = "Lo siento, tuve problemas procesando eso. Intenta buscar manualmente."
+#                    guardar_pregunta_desconocida(f"{query} [ERROR FALLBACK]")
+#                    return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': 'text'})
+#
+#            # Seguridad (no debería llegar aquí)
+#            return JsonResponse({'success': False, 'error': 'Error inesperado en flujo.'}, status=500)
+#
+#        except json.JSONDecodeError:
+#             print("[CHATBOT] Error: JSON inválido recibido.")
+#             return JsonResponse({'success': False, 'error': 'Error en formato de datos.'}, status=400)
+#        except Exception as e:
+#            print(f"ERROR FATAL en chatbot_query: {str(e)}\n{traceback.format_exc()}")
+#            return JsonResponse({'success': False, 'error': 'Error interno del servidor.'}, status=500)
+#
+#    return JsonResponse({'success': False, 'error': 'Método no permitido.'}, status=405)
+#
+#
+## --- Vista para la Barra de Búsqueda (GET) (Requisito 2) ---
+#def search_redirect_view(request):
+#    """
+#    Procesa la consulta de la barra de búsqueda principal, extrae keywords
+#    y redirige a la página de resultados de búsqueda de Django.
+#    """
+#    raw_query = request.GET.get('q', '').strip()
+#
+#    # === REQUISITO 1: Registrar input de la barra de búsqueda ===
+#    log_user_input(raw_query, 'SEARCH_BAR')
+#
+#    if not raw_query:
+#        # Si no hay consulta, redirigir a la lista de productos o a donde prefieras
+#        print("[SEARCH_BAR] Consulta vacía, redirigiendo a lista de productos.")
+#        return redirect(reverse('products:product_list'))
+#
+#    query_corregida = corregir_con_regex(raw_query, correcciones)
+#    palabras_clave_str = extraer_palabras_clave(query_corregida)
+#    termino_busqueda_final = palabras_clave_str if palabras_clave_str else query_corregida
+#    if not termino_busqueda_final: termino_busqueda_final = raw_query
+#
+#    print(f"[SEARCH_BAR] Original: '{raw_query}' | Corregida: '{query_corregida}' | Claves: '{palabras_clave_str}' | Final: '{termino_busqueda_final}'")
+#
+#    # 3. Construir URL y Redirigir
+#    try:
+#        # Asume que tienes una URL nombrada 'products:search' que maneja la búsqueda GET
+#        search_results_url = f"{reverse('products:search')}?q={quote_plus(termino_busqueda_final)}"
+#        print(f"[SEARCH_BAR] Redirigiendo a: {search_results_url}")
+#        # Usar HttpResponseRedirect o redirect
+#        return redirect(search_results_url)
+#        # return HttpResponseRedirect(search_results_url)
+#
+#    except Exception as e:
+#        print(f"Error generando URL de redirección de búsqueda: {e}\n{traceback.format_exc()}")
+#        # Fallback si falla la generación de URL (ej. a la home)
+#        try:
+#            fallback_url = reverse('products:index')
+#        except Exception:
+#            fallback_url = '/' # Último recurso
+#        return redirect(fallback_url)
+# ! error
 
 try:
-    nlp = spacy.load("es_core_news_sm")
-except:
-    import es_core_news_sm
-    nlp = es_core_news_sm.load()
+    from products.models import Product, Category
+except ImportError:
+    print("Error: No se pudieron importar los modelos...")
+    class DummyModel:
+        objects = None
+        DoesNotExist = Exception
+        MultipleObjectsReturned = Exception
+        def filter(self, *args, **kwargs): return self
+        def get(self, *args, **kwargs): raise self.DoesNotExist
+        def all(self): return []
+        def exists(self): return False
+        def first(self): return None
+        def count(self): return 0
+        def distinct(self): return self
+        def order_by(self, *args): return self
+        def __iter__(self): yield from []
+        def __getitem__(self, key): return []
+    Product = Category = DummyModel()
+
+
+# ========== Cargar Modelo Spacy ==========
+NLP_MODEL_NAME = "es_core_news_sm"
+try:#2
+    nlp = spacy.load(NLP_MODEL_NAME)
+except OSError:
+    print(f"Modelo Spacy '{NLP_MODEL_NAME}' no encontrado. Descargando...")#Nicolas y Johan cuando terminen quiten todo esto
+    try:
+        spacy.cli.download(NLP_MODEL_NAME)
+        import importlib
+        module = importlib.import_module(NLP_MODEL_NAME)
+        nlp = module.load()
+    except Exception as e:
+        print(f"Error al descargar o cargar el modelo Spacy '{NLP_MODEL_NAME}': {e}")
+        print("El chatbot podría no funcionar correctamente sin el modelo NLP.")
+        nlp = None # Marcar que nlp no está disponible
+
 
 # ========== CHATBOT SETUP ==========
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, 'chatbot_db.sqlite3')
-
-try:
-    nlp = spacy.load("es_core_news_sm")
-except Exception:
-    import es_core_news_sm
-    nlp = es_core_news_sm.load()
-
-# Instanciamos el chatbot (asegúrate de haber corrido previamente el entrenamiento en otro script)
+DB_PATH = os.path.join(BASE_DIR,'chatbot_db.sqlite3')
 chatbot = ChatBot(
     'CL4P-TP',
-    logic_adapters=['chatterbot.logic.BestMatch'],
     storage_adapter='chatterbot.storage.SQLStorageAdapter',
-    database_uri=f'sqlite:///{DB_PATH}'
+    database_uri=f'sqlite:///{DB_PATH}',
+    logic_adapters=[
+        {
+            'import_path': 'chatterbot.logic.BestMatch',
+            'default_response': 'Lo siento, no estoy seguro de cómo responder a eso. ¿Podrías preguntarme de otra forma?',
+            'maximum_similarity_threshold': 0.90
+        }
+    ]
+    # read_only=True # Poner en True en producción
 )
+LOG_FILE_PATH = os.path.join(BASE_DIR, 'registro_ingreso_texto.txt')
 
-# ========== VOCABULARIO ==========
+# ========== VOCABULARIO Y CONFIGURACIONES ==========
 
-SALUDOS = ['hola', 'oe', 'hey', 'saludos', 'buenos días', 'buenos dias', 'buenas tardes', 'buenas noches',
-           'we', 'wenas', 'wey', 'ey', 'buenas', 'que tal', 'qué tal', 'alo', 'que hay', 'como estamos', 'como andamos']
+SALUDOS = ['hola', 'oe', 'hey', 'saludos', 'buenos días', 'buenos dias', 'buenas tardes', 'buenas noches',#3
+           'we', 'wenas', 'wey', 'ey', 'buenas', 'que tal', 'qué tal', 'alo', 'que hay', 'como estamos', 'como andamos', 'oli', 'holis','holiwis']
 
-DESPEDIDAS = ['adios', 'chao', 'cuidate', 'hasta luego', 'hasta la proxima', 'adiós', 'nos vemos', 'chau',
-              'arrivederchi', 'nos vemos', 'chiao','bye']
+DESPEDIDAS = ['adios', 'chao', 'cuidate', 'hasta luego', 'hasta la proxima', 'adiós', 'nos vemos', 'chau',#4
+              'arrivederchi', 'nos vemos', 'chiao','bye', 'hasta pronto']
 
-AYUDA = ['ayuda', 'ayudame', 'como funciona', 'que haces','help']
+AYUDA = ['ayuda', 'ayudame', 'como funciona', 'que haces','help', 'info', 'informacion','help']#5
 
-BUSQUEDA_TRIGGERS = ["busco", "estoy buscando", "quiero ver", "necesito", "me interesa", "me gustaría ver","quiero"]
+BUSQUEDA_TRIGGERS = ["busco", "estoy buscando", "quiero ver", "necesito", "me interesa", "me gustaría ver","quiero", "buscando"]#6
 
-PALABRAS_ENVIO = ["envío", "envios", "envían", "hacen envíos", "despacho", "despachan","entrega", "entregas", "reparto", "reparten", "distribución",
-                  "enviaremos", "mandan", "envíen", "remesa", "remesas","envio", "envian", "hacen envios", "distribucion", "envien"]
+PALABRAS_ENVIO = ["envío", "envios", "envían", "hacen envíos", "despacho", "despachan","entrega", "entregas", "reparto", "reparten", "distribución", #7
+                   "enviaremos", "mandan", "envíen", "remesa", "remesas","envio", "envian", "hacen envios", "distribucion", "envien", "llegan", "llega"]
 
-# ========== CORRECCIONES - SINÓNIMOS - DICCIONARIOS - COLECCIONES GRANDES==========
-
-INTENCIONES = {
-    "inicio": ["inicio", "volver al inicio", "home", "página principal","index"],
-    "productos": ["productos", "ver productos", "mostrar productos", "catálogo","catálogo de productos","categoria","categorias","categorías","categoría",],
-    "login": ["iniciar sesión", "login", "acceder", "entrar","registrarse","registro","crear cuenta"],
+INTENCIONES = {#8
+    "inicio": ["inicio", "volver al inicio", "home", "página principal","index", "principal"],
+    "productos": ["productos", "ver productos", "mostrar productos", "catálogo","catálogo de productos","categoria","categorias","categorías","categoría", "tienda", "ver tienda", "catalogo"],
+    "login": ["iniciar sesión", "login", "acceder", "entrar","registrarse","registro","crear cuenta", "mi cuenta"],
 }
 
-PRODUCTOS =["juegos","juegazos","jueguitos","minecraft,audifonos","diadema","auriculares","procesador","cpu","gpu","mouse","raton","escritorio",
+PRODUCTOS =["juegos","juegazos","jueguitos","minecraft","audifonos","diadema","auriculares","procesador","cpu","gpu","mouse","raton","escritorio",#9
             "teclado de membrana","teclado","teclado mecanico","teclado optico","teclados memcanicos","disipador","disiapdores","Samsung","apple",
-            "huawei","xiaomi","motorola","Oppo","vivo","oneplus","realme","xbox one","xbox 360","xbox","xbox s","ps2",",ps3","ps4","ps5","play estation 2",
+            "huawei","xiaomi","motorola","Oppo","vivo","oneplus","realme","xbox one","xbox 360","xbox","xbox s","ps2","ps3","ps4","ps5","play estation 2",
             "play station 3","play estation 4","play estation 5","celulares","lenovo","google","Funko","bandai","corsair","asus","hp","nintendo","ubisoft",
             "electronic arts","supercell","elgato","razer","alcatel","tcl","lego","hot toys","msi","gigabyte","thermaltake","steam deck","rockstar games",
-            "activision blizard","capcom","hyperx","logitech"]
+            "activision blizard","capcom","hyperx","logitech", "tarjeta grafica", "ram", "memoria ram", "placa base", "fuente poder", "monitor", "pantalla",
+            "silla gamer", "refrigeracion liquida", "ventilador", "portatil", "laptop", "notebook"]
 
-correcciones = {
+correcciones = {#10
     "ke": "que", "k": "que", "xq": "por que", "pa": "para", "tbn": "también", "toy": "estoy", "toi": "estoy", "dnd": "donde",
     "kiero": "quiero", "sta": "esta", "stoy": "estoy", "ntnc": "entonces", "q tal": "qué tal", "procesador amd": "procesador AMD",
-    "grafica nvidia": "tarjeta gráfica NVIDIA", "grafica amd": "tarjeta gráfica AMD", "grafica": "tarjeta gráfica",
+    "grafica nvidia": "tarjeta gráfica NVIDIA", "grafica amd": "tarjeta gráfica AMD", "grafica": "tarjeta gráfica", "gpu": "tarjeta gráfica",
     "mouse gamer": "ratón gamer", "pantaya gamer": "pantalla gamer", "raton": "ratón", "ssd": "disco SSD",
     "hdd": "disco HDD", "celu": "celular", "lap": "laptop", "play": "PlayStation", "auris": "auriculares",
     "bn": "bien", "x": "por", "cel": "celular", "tv": "televisor", "headset": "auriculares con micrófono",
@@ -92,10 +411,11 @@ correcciones = {
     "escritorio gamer": "mesa gamer","control play": "control de PlayStation","control xbox": "control de Xbox",
     "xbox x": "Xbox Series X","xbox s": "Xbox Series S","ps5": "PlayStation 5","ps4": "PlayStation 4",
     "nintendo switch": "Nintendo Switch","switch oled": "Nintendo Switch OLED","switch lite": "Nintendo Switch Lite",
-    "minecra": "Minecraft","mincraf": "Minecraft","micraf": "Minecraft","fortnait": "Fortnite","fornite": "Fortnite",
+    "miencraft": "minecraft", "minecra": "minecraft", "mincraf": "minecraft", "micraf": "minecraft",
+    "fortnait": "Fortnite","fornite": "Fortnite", "fortnai": "Fortnite",
     "jueguitos": "videojuegos","jueguito": "videojuego","usb": "memoria USB","micro sd": "tarjeta MicroSD",
     "cargador cel": "cargador de celular","cargador lap": "cargador de laptop","pc gamer": "PC Gamer","notebook": "laptop",
-    "cpu": "procesador","gpu": "tarjeta gráfica","cámara": "cámara web","camara": "cámara","porq": "porque","xk": "porque",
+    "cpu": "procesador","cámara": "cámara web","camara": "cámara","porq": "porque","xk": "porque",
     "pq": "porque","asi que": "así que","nose": "no sé","aunqueh": "aunque","en tonces": "entonces","tonces": "entonces",
     "entonses": "entonces","dsp": "después","luegp": "luego","depues": "después","ademas": "además",
     "aparte de eso": "además","por lo tanto": "por lo tanto","asi ": "asimismo","por otro lado": "por otro lado",
@@ -110,7 +430,7 @@ correcciones = {
     "alfinal": "al final","es decir": "es decir","osea": "o sea","ose": "o sea","o sea": "o sea","talvez": "tal vez",
     "tal ves": "tal vez","talves": "tal vez","quizas": "quizás","quiza": "quizá","kizas": "quizás","kisa": "quizá",
     "deecho": "de hecho","de echo": "de hecho","valla": "vaya","vaya": "vaya","vaya a": "vaya a","tenga": "tenga",
-    "que tenga": "que tenga","un": "un","una": "una","unos": "unos","unas": "unas","con": "con","i": "y","u":"u",
+    "que tenga": "que tenga","i": "y","u":"u", "refrigeracion": "refrigeración", "liquida": "líquida",
     "por ke": "porque","ya qe": "ya que","ya ke": "ya que","yaque": "ya que","pues": "pues","puez": "pues",
     "puesto qe": "puesto que","puesto ke": "puesto que","puesto que": "puesto que","dado qe": "dado que",
     "dado ke": "dado que","dado que": "dado que","debido a que": "debido a que","debuidoi a q": "debido a que",
@@ -127,21 +447,29 @@ correcciones = {
     "memoria externa": "almacenamiento externo","microfon": "micrófono","micro": "micrófono","cascos": "audífonos",
     "auris gamer": "auriculares gamer","lsta":"lista","articulso":"articulos","lapto":"laptop","laotop":"laptop",
     "compu":"computador",
+
 }
 
-sinonimos_productos = {
-    "celular": ["teléfono", "móvil", "smartphone"],
+# Diccionario de sinónimos para normalizar términos de productos
+sinonimos_productos = {#11
+    "celular": ["teléfono", "móvil", "smartphone", "cel"],
     "tv": ["televisor", "pantalla", "television"],
-    "pc": ["computadora", "ordenador", "pc gamer", "computador"],
-    "laptop": ["notebook", "portátil", "laptop"],
+    "pc": ["computadora", "ordenador", "pc gamer", "computador", "compu", "cpu"],
+    "laptop": ["notebook", "portátil", "lap"],
     "monitor": ["pantalla", "display", "monitor gamer"],
     "ratón": ["mouse", "ratón gamer", "mouse gamer"],
-    "teclado": ["teclado gamer", "teclado mecánico"],
-    "auriculares": ["audífonos", "auris", "headset"],
-    "juegos": ["video juegos", "jueguitos", "juegazos"]
+    "teclado": ["teclado gamer", "teclado mecánico", "teclado optico", "teclado membrana"],
+    "auriculares": ["audífonos", "auris", "headset", "cascos", "diadema"],
+    "juegos": ["video juegos", "jueguitos", "juegazos", "videojuegos", "juego"],
+    "tarjeta gráfica": ["grafica", "gpu", "tarjeta de video"],
+    "procesador": ["cpu", "microprocesador"],
+    "ram": ["memoria", "memoria ram"],
+    "disco": ["almacenamiento", "disco duro", "ssd", "hdd"],
+    "silla": ["silla gamer", "silla de escritorio"]
 }
 
-PAISES = [
+# Lista de países (para preguntas de envío) - Asegúrate que esté en minúsculas y sin tildes
+PAISES = [#12
     "afganistan", "albania", "alemania", "andorra", "angola", "antigua y barbuda", "arabia saudita",
     "argelia", "argentina", "armenia", "australia", "austria", "azerbaiyan", "bahamas", "banglades",
     "barbados", "barein", "belgica", "belice", "benin", "bielorrusia", "birmania", "bolivia",
@@ -163,7 +491,7 @@ PAISES = [
     "papua nueva guinea", "paraguay", "peru", "polonia", "portugal", "reino unido",
     "republica centroafricana", "republica checa", "republica del congo",
     "republica democratica del congo", "republica dominicana", "ruanda", "rumania", "rusia",
-    "san cristobal y nieves", "san marino", "san vicente y las granadinas", "santa lucia",
+    "samoa", "san cristobal y nieves", "san marino", "san vicente y las granadinas", "santa lucia",
     "santo tome y principe", "senegal", "serbia", "seychelles", "sierra leona", "singapur",
     "siria", "somalia", "sri lanka", "sudafrica", "sudan", "sudan del sur", "suecia", "suiza",
     "surinam", "tailandia", "tanzania", "tayikistan", "timor oriental", "togo", "tonga",
@@ -173,302 +501,688 @@ PAISES = [
 ]
 
 category_keywords = {
-                'portatil': 'Portátiles Gaming',
-                'laptop': 'Portátiles Gaming',
-                'notebook': 'Portátiles Gaming',
-                'gaming': None,
-                'juego': None,
-                'teclado': 'Periféricos',
-                'mouse': 'Periféricos',
-                'raton': 'Periféricos',
-                'auricular': 'Periféricos',
-                'cascos': 'Periféricos',
-                'tarjeta': 'Componentes',
-                'grafica': 'Componentes',
-                'procesador': 'Componentes',
-                'cpu': 'Componentes',
-                'placa': 'Componentes',
-                'monitor': 'Monitores',
-                'pantalla': 'Monitores',
-                'silla': 'Sillas Gaming',
-            }
+   # Portátiles Gaming
+   'portatil': 'Portátiles Gaming', 'portátil': 'Portátiles Gaming', 'laptop': 'Portátiles Gaming',
+   'notebook': 'Portátiles Gaming', 'ultrabook': 'Portátiles Gaming',
+   # Consolas y Videojuegos
+   'gaming': 'Consolas y Videojuegos', 'juego': 'Consolas y Videojuegos',
+   'consola': 'Consolas y Videojuegos', 'videojuego': 'Consolas y Videojuegos',
+   'xbox': 'Consolas y Videojuegos', 'playstation': 'Consolas y Videojuegos',
+   'ps4': 'Consolas y Videojuegos', 'ps5': 'Consolas y Videojuegos',
+   'nintendo': 'Consolas y Videojuegos',
+   # Periféricos
+   'teclado': 'Periféricos', 'keyboard': 'Periféricos',
+   'mouse': 'Periféricos', 'raton': 'Periféricos',
+   'auricular': 'Periféricos', 'audifono': 'Periféricos',
+   'headset': 'Periféricos', 'cascos': 'Periféricos',
+   'diadema': 'Periféricos', 'periferico': 'Periféricos',
+   'periférico': 'Periféricos', 'microfono': 'Periféricos',
+   'micrófono': 'Periféricos',
+   # Componentes
+   'tarjeta': 'Componentes', 'grafica': 'Componentes',
+   'tarjeta grafica': 'Componentes', 'gpu': 'Componentes',
+   'video': 'Componentes', 'procesador': 'Componentes',
+   'cpu': 'Componentes', 'ram': 'Componentes',
+   'memoria': 'Componentes', 'placa': 'Componentes',
+   'board': 'Componentes', 'motherboard': 'Componentes',
+   'disco': 'Componentes', 'ssd': 'Componentes',
+   'hdd': 'Componentes', 'almacenamiento': 'Componentes',
+   'fuente': 'Componentes', 'poder': 'Componentes',
+   'componente': 'Componentes',
+   # Monitores
+   'monitor': 'Monitores', 'pantalla': 'Monitores',
+   'display': 'Monitores',
+   # Sillas Gaming
+   'silla': 'Sillas Gaming', 'silla gamer': 'Sillas Gaming',
+   'silla gaming': 'Sillas Gaming',
+   # Muebles y Accesorios
+   'escritorio': 'Muebles y Accesorios', 'mueble': 'Muebles y Accesorios',
+   'accesorio': 'Muebles y Accesorios', 'mesa': 'Muebles y Accesorios',
+   'soporte': 'Muebles y Accesorios', 'organizador': 'Muebles y Accesorios',
+   # Refrigeración
+   'refrigeracion': 'Refrigeración', 'refrigeración': 'Refrigeración',
+   'ventilador': 'Refrigeración', 'cooler': 'Refrigeración',
+   'disipador': 'Refrigeración', 'liquida': 'Refrigeración',
+   'watercooling': 'Refrigeración', 'radiador': 'Refrigeración'
+}
 
-# ========== NLP FUNCTIONS ==========
+PALABRAS_A_IGNORAR = set(spacy_stop_words) | set(BUSQUEDA_TRIGGERS) | {
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "a", "en",
+    "y", "o", "pero", "si", "no", "es", "son", "este", "esta", "estos", "estas",
+    "ser", "estar", "tener", "hacer", "ir", "poder", "deber", "querer", "mi", "tu",
+    "su", "nuestro", "vuestro", "me", "te", "se", "nos", "os", "le", "les", "al",
+    "lo", "con", "para", "por", "más", "muy", "poco", "mucho", "bien", "mal", "así",
+    "como", "cuando", "donde", "quien", "cuales", "cual", "algo", "nada", "todo",
+    "todos", "todas", "uno", "dos", "tres", "u", "e", "ni", "sin", "sobre", "tras",
+    "ante", "bajo", "cabe", "contra", "desde", "durante", "hacia", "hasta", "mediante",
+    "según", "so", "también", "tampoco", "quizás", "tal vez", "vez", "ya", "aun",
+    "aunque", "porque", "pues", "siempre", "nunca", "jamás", "ahora", "hoy", "ayer",
+    "mañana", "aquí", "allí", "allá", "esto", "eso", "aquello", "hay", "era", "fue",
+    "sería", "había", "habrá", "he", "has", "ha", "hemos", "habéis", "han", "estoy",
+    "estás", "está", "estamos", "estáis", "están", "fui", "fuiste", "fuimos",
+    "fuisteis", "fueron", "iré", "irás", "irá", "iremos", "iréis", "irán", "tenido",
+    "tenías", "tenía", "teníamos", "teníais", "tenían", "hice", "hiciste", "hizo",
+    "hicimos", "hicisteis", "hicieron", "pude", "pudiste", "pudo", "pudimos", "pudisteis",
+    "pudieron", "debí", "debiste", "debió", "debimos", "debisteis", "debieron", "quise",
+    "quisiste", "quiso", "quisimos", "quisisteis", "quisieron", ",", ".", ";", ":",
+    "¿", "?", "¡", "!", "(", ")", "[", "]", "{", "}", "'", '"', "-", "_", "+", "=",
+    "*", "/", "<", ">", "~", "^", "`", "|", "\\", "@", "#", "$", "%", "&",
+    'comprar', 'ver', 'mostrar', 'dame', 'precio', 'costo', 'valor', 'cotizar',
+    'cuanto', 'cuesta', 'vale', 'tienen', 'tienes', 'venden', 'ofrecen',
+    'favor', 'porfa', 'porfis', 'quisiera', 'info', 'informacion', 'ayuda'
+}
 
-def generar_sinonimos(frase):
+MARCAS = ['asus', 'lenovo', 'apple', 'hp', 'msi', 'gigabyte', 'razer', 'hyperx', 'logitech',#15
+          'corsair', 'samsung', 'lg', 'acer', 'dell', 'intel', 'amd', 'nvidia', 'kingston',
+          'seagate', 'western digital', 'wd', 'adata', 'crucial', 'evga', 'thermaltake',
+          'cooler master', 'nzxt', 'lian li', 'be quiet', 'steelseries', 'microsoft', 'sony',
+          'nintendo', 'xbox', 'playstation','poco','nubia','asus rog','aorus','gigabyte','tukasa','msi','nzxt','nvidia','microsoft','mojang']
+
+# ========== FUNCIONES HELPER NLP ==========
+
+def log_user_input(query, source):
+    """Registra la consulta cruda del usuario, timestamp y origen."""
+    if not query:
+        return  # No registrar consultas vacías
+    try:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Usar repr(query) para manejar caracteres especiales y saltos de línea
+        log_entry = f"{timestamp} [{source.upper()}] - {repr(query)}\n"
+        with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
+            f.write(log_entry)
+    except Exception as e:
+        print(f"Error al escribir en log '{LOG_FILE_PATH}': {e}")
+
+def generar_sinonimos(frase):#16
+    """Genera frases alternativas usando sinónimos de WordNet."""
     palabras = frase.lower().split()
-    frases_sinonimos = []
-    for i, palabra in enumerate(palabras):
-        sinonimos = wordnet.synsets(palabra)
-        sinonimos = set(chain.from_iterable([s.lemma_names() for s in sinonimos]))
-        for sinonimo in sinonimos:
-            nueva = palabras.copy()
-            nueva[i] = sinonimo.replace('_', ' ')
-            frases_sinonimos.append(" ".join(nueva))
-    return list(set(frases_sinonimos))
+    frases_sinonimos = [frase]
+    try:
+        for i, palabra in enumerate(palabras):
+            sinonimos_Lemmas = set()
+            for syn in wordnet.synsets(palabra, lang='spa'):
+                 for lemma in syn.lemmas(lang='spa'):
+                     sinonimos_Lemmas.add(lemma.name().replace('_', ' '))
 
-def guardar_pregunta_desconocida(pregunta):
-    with open("preguntas_nuevas.txt","a",encoding="utf-8") as f:
-        f.write(pregunta+"\n")
+            for sinonimo in sinonimos_Lemmas:
+                if palabra != sinonimo:
+                    nueva = palabras.copy()
+                    nueva[i] = sinonimo
+                    frases_sinonimos.append(" ".join(nueva))
+    except Exception as e:
+        print(f"Error al generar sinónimos para '{frase}': {e}")
+    return list(set(frases_sinonimos)) # Devolver lista única
 
-def corregir_con_regex(texto, correcciones):
-    patron = re.compile(r'\b(' + '|'.join(re.escape(k) for k in correcciones.keys()) + r')\b')
-    return patron.sub(lambda x: correcciones[x.group()], texto.lower())
+def guardar_pregunta_desconocida(pregunta): #17 (Guardar pregunta no entendida)
+    """Guarda la pregunta no respondida en un archivo para revisión."""
+    log_user_input(f"Pregunta Desconocida: {pregunta}", "SYSTEM")  # 👈 EXTRA
+    try:
+        with open("preguntas_nuevas.txt", "a", encoding="utf-8") as f:
+            f.write(pregunta + "\n")
+    except Exception as e:
+        print(f"Error al guardar pregunta desconocida: {e}")
 
-def preprocesar_texto(texto):
-    texto = unidecode(texto.lower())
-    texto = re.sub(r'[^\w\s]', '', texto)
-    doc = nlp(texto)
+
+def corregir_con_regex(texto, dict_correcciones): #18
+    """Aplica correcciones básicas usando un diccionario y regex."""
+    if not texto or not isinstance(texto, str):
+        return ""
+    patron = re.compile(r'\b(' + '|'.join(re.escape(k) for k in dict_correcciones.keys()) + r')\b', re.IGNORECASE)
+    texto_lower = texto.lower()
+    texto_corregido = patron.sub(lambda x: dict_correcciones.get(x.group().lower(), x.group()), texto_lower)
+    return texto_corregido
+
+def preprocesar_texto(texto):#19
+    """Lematiza y elimina stop words (versión simplificada)."""
+    if not nlp or not texto or not isinstance(texto, str):
+        return []
+    texto_normalizado = unidecode(texto.lower())
+    texto_limpio = re.sub(r'[^\w\s]', '', texto_normalizado)
+    doc = nlp(texto_limpio)
     return [token.lemma_ for token in doc if not token.is_stop and len(token.text) > 2]
 
-def es_pregunta_envio(mensaje):
-    mensaje = mensaje.lower()
-    return any(palabra in mensaje for palabra in PALABRAS_ENVIO)
+def extraer_palabras_clave(texto_usuario):#20
+    """
+    Limpia la consulta del usuario para extraer solo las palabras clave
+    relevantes para la búsqueda de productos o categorías.
+    """
+    if not nlp or not texto_usuario or not isinstance(texto_usuario, str):
+        return ""
 
-def detectar_intencion(texto):
+    texto_limpio = texto_usuario.lower()
+    doc = nlp(texto_limpio)
+
+    palabras_clave = []
+    for token in doc:
+        lema = token.lemma_
+        if not token.is_punct and not token.is_space and \
+           lema not in PALABRAS_A_IGNORAR and \
+           token.text not in PALABRAS_A_IGNORAR:
+            palabras_clave.append(token.text)
+    resultado = " ".join(palabras_clave).strip()
+    #resultado = " ".join(list(dict.fromkeys(resultado.split())))
+    return resultado
+
+
+def es_pregunta_envio(mensaje):#21
+    """Verifica si el mensaje contiene palabras clave de envío."""
+    mensaje_lower = unidecode(mensaje.lower())
+    return any(palabra in mensaje_lower for palabra in PALABRAS_ENVIO)
+
+def detectar_intencion(texto):#22
+    """Detecta intenciones básicas (saludo, despedida, envío, etc.)."""
+    if not texto or not isinstance(texto, str):
+        return "intencion_desconocida"
+
     texto_corregido = corregir_con_regex(texto, correcciones)
-    texto_preprocesado = ' '.join(preprocesar_texto(texto_corregido))
-    if re.search(r'\b(hola|buenas|ola|klk|holi)\b', texto_preprocesado):
+    texto_normalizado = unidecode(texto_corregido.lower())
+
+    if any(saludo in texto_normalizado for saludo in SALUDOS):
         return "saludo"
-    if re.search(r'\b(adios|chao|nos vemos|bye)\b', texto_preprocesado):
+    if any(despedida in texto_normalizado for despedida in DESPEDIDAS):
         return "despedida"
-    if re.search(r'\b(tienen|quiero|busco|venden|hay|tienen envio)\b', texto_preprocesado):
-        return "pregunta_producto"
-    if re.search(r'\b(precio|cuesta|vale|cuánto)\b', texto_preprocesado):
-        return "pregunta_precio"
-    if re.search(r'\b(envio|envían|mandan|llegan)\b', texto_preprocesado):
+    if es_pregunta_envio(texto_normalizado): # Usar función específica para envíos
         return "pregunta_envio"
-    if re.search(r'\b(jajaja|xd|wtf|lol)\b', texto_preprocesado):
-        return "chiste"
-    return "intencion_desconocida"
+    if any(ayuda in texto_normalizado for ayuda in AYUDA):
+        return "ayuda"
 
-def detectar_producto(texto):
-    texto_corregido = corregir_con_regex(texto, correcciones)
-    for producto, sinonimos in sinonimos_productos.items():
-        for s in sinonimos:
-            if re.search(r'\b' + re.escape(s) + r'\b', texto_corregido):
-                return producto
+    return "intencion_desconocida" # Por defecto
+
+def detectar_producto(texto):#23
+    """Intenta detectar un tipo general de producto usando sinónimos."""
+    texto_corregido = unidecode(corregir_con_regex(texto, correcciones).lower())
+    for producto_base, lista_sinonimos in sinonimos_productos.items():
+        if any(re.search(r'\b' + re.escape(s) + r'\b', texto_corregido) for s in lista_sinonimos):
+            return producto_base
     return None
 
-def detectar_pais_en_mensaje(mensaje):
-    mensaje = mensaje.lower()
+def detectar_pais_en_mensaje(mensaje):#24
+    """Detecta si se menciona un país de la lista."""
+    mensaje_lower = unidecode(mensaje.lower())
     for pais in PAISES:
-        if pais in mensaje:
+        # Buscar palabra completa
+        if re.search(r'\b' + re.escape(pais) + r'\b', mensaje_lower):
             return pais
     return None
 
-def detectar_busqueda(texto_usuario):
-    texto = texto_usuario.lower()
-    for trigger in BUSQUEDA_TRIGGERS:
-        if trigger in texto:
-            partes = texto.split(trigger, 1)
-            if len(partes) > 1:
-                producto = partes[1].strip()
-                if producto:
-                    return f"¡Entendido! Puedes buscar '{producto}' desde la barra de búsqueda 🔍 en la parte superior de la página."
-
-    # Fallback con PRODUCTOS
-    for prod in PRODUCTOS:
-        if prod in texto:
-            return f"¡Claro! Puedes buscar '{prod}' desde la barra de búsqueda 🔍 en la parte superior de la página."
-
-    return None
-
-def responder_usuario(texto):
-    intencion = detectar_intencion(texto)
-    producto = detectar_producto(texto)
-    texto_corregido = corregir_con_regex(texto, correcciones)
-
-    if intencion == "saludo":
-        return "¡Hola! 👋 ¿En qué puedo ayudarte hoy?"
-    elif intencion == "despedida":
-        return "¡Hasta luego! Gracias por visitar TecLegacy 💻"
-    elif intencion == "pregunta_producto":
-        if producto:
-            return f"¡Claro! Tenemos varias opciones de {producto}. ¿Buscas algo en específico?"
-        else:
-            return "¿Qué producto estás buscando exactamente? Tengo muchas opciones para mostrarte."
-    elif intencion == "pregunta_precio":
-        if producto:
-            return f"El precio de {producto} depende del modelo. ¿Quieres que te muestre opciones?"
-        else:
-            return "¿De qué producto quieres saber el precio?"
-    elif intencion == "pregunta_envio":
-        pais_detectado = detectar_pais_en_mensaje(texto)
-        if pais_detectado and pais_detectado != "colombia":
-            return f"Actualmente no realizamos envíos a {pais_detectado.title()}. Solo hacemos envíos nacionales dentro de Colombia."
-        elif pais_detectado == "colombia":
-            return "¡Claro que Sí, hacemos envíos a Toda Colombia. ✈️📦🚗"
-        else:
-            return chatbot.get_response(response)
-    elif intencion == "chiste":
-        return "Jajaja 😂 ¡Tú sí que sabes bromear! Pero también sé de hardware si necesitas ayuda 😎"
-    else:
-        respuesta = chatbot.get_response(texto_corregido)
-        if float(respuesta.confidence) < 0.70:
-            guardar_pregunta_desconocida(texto)
-            print("CL4P-TP:No estoy seguro de cómo responder eso aún. ¡Lo guardaré para aprender!🧠")
-            return "Lo siento, no entendí muy bien tu mensaje. ¿Podrías reformularlo o ser un poco más específico?"
-        else:
-            return str(respuesta)
-# ========== DJANGO VIEW ==========
-
-@csrf_exempt
-def chatbot_query(request):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            query = data.get('query', '').strip().lower()
-            query_corregida = corregir_con_regex(query, correcciones)
-
-            if not query_corregida:
-                return JsonResponse({'success': False, 'error': 'Consulta vacía.'})
-
-            # Primero intentamos con respuesta personalizada
-            respuesta_personalizada = responder_usuario(query_corregida)
-            if respuesta_personalizada:
-                return JsonResponse({'success': True, 'response': respuesta_personalizada})
-
-            # Si no hay intención clara, usamos el modelo ChatterBot
-            response = chatbot.get_response(query_corregida)
-            return JsonResponse({'success': True, 'response': str(response)})
-
-        except Exception as e:
-            return JsonResponse({'success': False, 'error': f'Ha ocurrido un error: {str(e)}'})
-
-    return JsonResponse({'success': False, 'error': 'Método no permitido'})
-
-# ========== RESPUESTAS DINAMICAS - RESPUESTAS ESTATICAS ==========
-def obtener_productos_desde_query(query):
-    query = query.lower()
-
-    category_keywords = {
-        'portatil': 'Portátiles Gaming',
-        'laptop': 'Portátiles Gaming',
-        'notebook': 'Portátiles Gaming',
-        'gaming': None,
-        'juego': None,
-        'teclado': 'Periféricos',
-        'mouse': 'Periféricos',
-        'raton': 'Periféricos',
-        'auricular': 'Periféricos',
-        'cascos': 'Periféricos',
-        'tarjeta': 'Componentes',
-        'grafica': 'Componentes',
-        'procesador': 'Componentes',
-        'cpu': 'Componentes',
-        'placa': 'Componentes',
-        'monitor': 'Monitores',
-        'pantalla': 'Monitores',
-        'silla': 'Sillas Gaming',
-    }
-
-    price_pattern = r'menos de (\d+)|bajo (\d+)|maximo (\d+)|hasta (\d+)'
-    price_match = re.search(price_pattern, query)
-    max_price = None
-
-    if price_match:
-        for group in price_match.groups():
-            if group is not None:
-                max_price = int(group) * 1000
-                break
-
-    products_query = Product.objects.filter(is_available=True)
-    category_filter_applied = False
-
-    for keyword, category_name in category_keywords.items():
-        if keyword in query:
-            if category_name:
-                try:
-                    category = Category.objects.get(name=category_name)
-                    products_query = products_query.filter(category=category)
-                    category_filter_applied = True
-                except Category.DoesNotExist:
-                    pass
-            else:
-                products_query = products_query.filter(name__icontains=keyword)
-                category_filter_applied = True
-
-    if not category_filter_applied:
-        keywords = [word for word in query.split() if len(word) >= 3]
-        for keyword in keywords:
-            products_query = products_query.filter(
-                models.Q(name__icontains=keyword) |
-                models.Q(description__icontains=keyword)
-            )
-
-    if max_price:
-        products_query = products_query.filter(price__lte=max_price)
-
-    return products_query[:5], max_price
-
-def chatbot_response(request):
-    if request.method == "POST":
-        user_input = request.POST.get("message", "").lower()
-
-        # Respuestas estáticas
-        if "inicio" in user_input:
-            return JsonResponse({"response": reverse("products:index")})
-        if "ver productos" in user_input or "todos los productos" in user_input:
-            return JsonResponse({"response": reverse("products:product_list")})
-
-        # PRIMERO: intenta detectar productos desde el query personalizado
-        productos, max_price = obtener_productos_desde_query(user_input)
-        if productos.exists():
-            respuesta = generar_respuesta_con_links(productos, max_price)
-            return JsonResponse({"response": respuesta})
-
-        # SI NO: intenta detectar si se refiere a una categoría exacta
-        for category in Category.objects.all():
-            if category.name.lower() in user_input:
-                return JsonResponse({
-                    "response": reverse("products:products_by_category", args=[category.slug])
-                })
-
-        # POR ÚLTIMO: Fallback a búsqueda general
-        return JsonResponse({
-            "response": f"{reverse('products:search')}?q={user_input}"
-        })
-
-def detectar_busqueda(texto_usuario):
-    patron = r"(busco|estoy buscando|quiero ver|necesito) (una|un|unos|unas)? (.+)"
-    match = re.search(patron, texto_usuario, re.IGNORECASE)
-    if match:
-        producto = match.group(3)
-        return f"¡Entendido! Puedes buscar '{producto}' desde la barra de búsqueda 🔍 en la parte superior de la página."
-    return None
-
-def generar_respuesta_con_links(products, max_price=None):
-    if not products.exists():
-        return "Lo siento, no encontré productos que coincidan con tu búsqueda."
-
-    if max_price:
-        response = f"He encontrado estos productos por menos de ${max_price / 1000}k:<br>"
-    else:
-        response = "He encontrado estos productos para ti:<br>"
-
-    for product in products:
-        price_formatted = '{:,.0f}'.format(product.price).replace(',', '.')
-        response += f"- <a href='/products/{product.category.slug}/{product.slug}/'>{product.name}</a> - ${price_formatted}<br>"
-
-    if products.count() == 5:
-        response += "<br>Estos son solo algunos resultados. ¿Quieres más detalles o buscar algo más específico?"
-
-    return response
-
-MARCAS = ['asus', 'lenovo', 'apple', 'hp', 'msi', 'gigabyte', 'razer', 'hyperx', ...]
-def detectar_marca(texto):
-    texto = unidecode(texto.lower())
+def detectar_marca(texto):#25
+    """Detecta si se menciona una marca de la lista."""
+    texto_lower = unidecode(texto.lower())
     for marca in MARCAS:
-        if marca in texto:
+        if re.search(r'\b' + re.escape(marca) + r'\b', texto_lower):
             return marca
     return None
 
-def detectar_productos(texto):
-    texto_corregido = corregir_con_regex(texto, correcciones)
-    encontrados = set()
-    for producto, sinonimos in sinonimos_productos.items():
-        for s in sinonimos:
-            if re.search(r'\b' + re.escape(s) + r'\b', texto_corregido):
-                encontrados.add(producto)
-    return list(encontrados)
+
+# ========== FUNCIONES DE LÓGICA DEL CHATBOT ==========
+
+def obtener_productos_desde_query(palabras_clave_query):#26
+    """
+    Busca productos en la BD basándose en las palabras clave.
+    Intenta mapear a categorías y busca en nombre/descripción.
+    """
+    if not Product or not Product.objects: # Verificar si el modelo está disponible
+        print("WARN: Modelo Product no disponible para búsqueda.")
+        return Product.objects.none(), None # Devolver un queryset vacío
+
+    query = palabras_clave_query.lower().strip()
+    max_price = None # Inicializar max_price
+    price_pattern = r'(?:menos de|bajo|maximo|hasta)\s*(\d+)\s*(k|mil)?'
+    price_match = re.search(price_pattern, query)
+
+    if price_match:
+        price_value = int(price_match.group(1))
+        multiplier = 1000 if price_match.group(2) in ['k', 'mil'] else 1
+        max_price = price_value * multiplier
+        # Remover la parte del precio de la query para no interferir con la búsqueda de keywords
+        query = re.sub(price_pattern, '', query).strip()
+        print(f"Detectado precio máximo: {max_price}")
+
+    # Empezar con todos los productos disponibles
+    products_query = Product.objects.filter(is_available=True)
+    category_filter_applied = False
+    keywords_used_for_filter = False
+
+    # 1. Mapear keywords a categorías específicas
+    keywords_in_query = query.split()
+    found_category = None
+    for keyword in keywords_in_query:
+        if keyword in category_keywords and category_keywords[keyword]:
+            category_name = category_keywords[keyword]
+            try:
+                # Usar get() asumiendo nombres de categoría únicos
+                category = Category.objects.get(name__iexact=category_name)
+                products_query = products_query.filter(category=category)
+                category_filter_applied = True
+                keywords_used_for_filter = True
+                found_category = category_name
+                print(f"Filtrado por categoría '{category_name}' debido a keyword '{keyword}'")
+                # Romper si ya encontramos una categoría mapeada (o ajustar si pueden ser varias)
+                break
+            except Category.DoesNotExist:
+                print(f"WARN: Categoría '{category_name}' mapeada pero no encontrada en BD.")
+            except Category.MultipleObjectsReturned:
+                 print(f"WARN: Múltiples categorías encontradas para '{category_name}'. Usando la primera.")
+                 category = Category.objects.filter(name__iexact=category_name).first()
+                 if category:
+                    products_query = products_query.filter(category=category)
+                    category_filter_applied = True
+                    keywords_used_for_filter = True
+                    found_category = category_name
+                    break
+
+    # 2. Filtrar por nombre/descripción/slug usando las palabras clave restantes
+    #    (O todas si no hubo filtro de categoría)
+    search_keywords = [word for word in query.split() if len(word) >= 2] # Mínimo 2 caracteres
+    if search_keywords:
+        filter_q = Q()
+        for keyword in search_keywords:
+            # Buscar que CUALQUIERA (OR) de las palabras clave esté en estos campos
+            filter_q |= Q(name__icontains=keyword) | \
+                        Q(description__icontains=keyword) | \
+                        Q(slug__icontains=keyword)
+            # Podríamos añadir búsqueda en marca si tienes un campo 'brand' en Product
+            # filter_q |= Q(brand__icontains=keyword)
+
+        # Aplicar el filtro Q
+        products_query = products_query.filter(filter_q)
+        keywords_used_for_filter = True
+        print(f"Filtrado por keywords (OR) en nombre/desc/slug: {search_keywords}")
+
+    # Si no se aplicó ningún filtro basado en keywords (raro), intentar con la query completa
+    if not category_filter_applied and not keywords_used_for_filter and query:
+         products_query = products_query.filter(Q(name__icontains=query) | Q(description__icontains=query))
+         print(f"Filtrado general por query completa (fallback): {query}")
+
+    # Aplicar filtro de precio si se detectó
+    if max_price is not None:
+        products_query = products_query.filter(price__lte=max_price)
+        print(f"Aplicado filtro de precio: <= {max_price}")
+
+    # Evitar duplicados y limitar resultados
+    # Ordenar por relevancia podría ser complejo, por ahora sin orden específico o por nombre
+    final_query = products_query.distinct().order_by('name')[:5] # Mostrar hasta 5
+
+    return final_query, max_price
+
+
+def generar_respuesta_con_links(products, max_price=None):#27
+    """Formatea la respuesta del chatbot con enlaces a los productos encontrados."""
+    if not products.exists():
+        # Este caso no debería ocurrir si se llama después de verificar products.exists()
+        return "Lo siento, no encontré productos que coincidan."
+
+    if max_price:
+        # Formatear el precio para mostrarlo legible (ej: 500.000)
+        price_formatted = '{:,.0f}'.format(max_price).replace(',', '.')
+        response = f"Encontré estos productos por menos de ${price_formatted}:<br>"
+    else:
+        response = "He encontrado estos productos que podrían interesarte:<br>"
+
+    # Construir la lista de productos con enlaces y precios
+    for product in products:
+        try:
+            # Generar URL del producto (asume que tienes una URL nombrada 'product_detail')
+            # Necesitas pasar los slugs correctos según tu URL pattern
+            product_url = reverse('products:product_detail', args=[product.category.slug, product.slug])
+            price_formatted = '{:,.0f}'.format(product.price).replace(',', '.')
+            # Usar <a target="_blank"> para abrir en nueva pestaña es opcional
+            response += f"- <a href='{product_url}'>{product.name}</a> (${price_formatted})<br>"
+        except Exception as e:
+            print(f"Error al generar URL para producto {product.slug}: {e}")
+            # Mostrar el producto sin enlace si falla la URL
+            price_formatted = '{:,.0f}'.format(product.price).replace(',', '.')
+            response += f"- {product.name} (${price_formatted}) [Error al generar enlace]<br>"
+
+
+    if products.count() >= 5: # Si se alcanzó el límite de 5
+        response += "<br>Estos son algunos resultados. Puedes ser más específico o usar la barra de búsqueda principal."
+
+    return response
+
+def responder_usuario(texto_corregido):  # 28 (Manejador Conversación Específica - Mejorado)
+    """Maneja intenciones conversacionales básicas y predefinidas."""
+    intencion = detectar_intencion(texto_corregido)
+    # Requisito 3: Lenguaje Natural (Respuestas variadas)
+    if intencion == "saludo":
+        respuestas = ["¡Hola! 👋 Bienvenido a TecLegacy. ¿Qué buscas hoy?", "¡Qué tal! 😊 ¿En qué puedo ayudarte?",
+                      "¡Buenas! Listo para ayudarte a encontrar lo mejor en tecnología.",
+                      "¡Hola! Dime qué producto tienes en mente."]
+        return random.choice(respuestas)
+    elif intencion == "despedida":
+        respuestas = ["¡Hasta luego! Gracias por visitarnos. Vuelve pronto 😊", "¡Chao! Que tengas un excelente día.",
+                      "¡Nos vemos! Si necesitas algo más, aquí estaré.", "¡Adiós! Espero haberte ayudado."]
+        return random.choice(respuestas)
+    elif intencion == "ayuda":
+        respuestas = [
+            "Soy tu asistente virtual en TecLegacy. Puedo buscar productos, categorías o ayudarte con preguntas sobre envíos. ¿Qué necesitas?",
+            "¡Claro! Pregúntame por un producto (ej: 'laptop gamer Asus') o sobre nuestros envíos (ej: 'envían a Medellín?').",
+            "Estoy aquí para ayudarte. Dime qué buscas o si tienes dudas sobre envíos."]
+        return random.choice(respuestas)
+    elif intencion == "pregunta_envio":
+        pais_detectado = detectar_pais_en_mensaje(texto_corregido)
+        if pais_detectado and pais_detectado != "colombia":
+            pais_title = pais_detectado.title()
+            return f"Qué pena, por ahora nuestros envíos son sólo dentro de Colombia 🇨🇴. No podemos enviar a {pais_title}."
+        else:
+            # Asumir Colombia si no se especifica otro país
+            return "¡Sí! Hacemos envíos a toda Colombia 🇨🇴. ¡Anímate a comprar! ✈️📦"
+    # Se podría añadir manejo para 'chiste' u otras intenciones básicas aquí
+    return None
+
+
+# ========== VISTA PRINCIPAL DEL CHATBOT ==========
+
+@csrf_exempt
+def chatbot_query(request):#29
+    """
+    Vista principal que maneja las consultas del chatbot vía POST.
+    Extrae palabras clave, busca productos/categorías, maneja intenciones,
+    intenta conversación general con ChatterBot y genera fallback a búsqueda.
+    """
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            query = data.get('query', '').strip()
+
+            if not query:
+                return JsonResponse({'success': False, 'error': 'Consulta vacía.'})
+
+            # 1. CORREGIR consulta
+            query_corregida = corregir_con_regex(query, correcciones)
+
+            # 2. EXTRAER PALABRAS CLAVE
+            palabras_clave_str = extraer_palabras_clave(query_corregida)
+
+            print(f"--- Consulta Recibida ---")
+            print(f"Original: '{query}' -> Corregida: '{query_corregida}' -> Claves: '{palabras_clave_str}'")
+
+            respuesta_encontrada = None
+            respuesta_tipo = 'text'
+
+            # 4. BUSCAR PRODUCTOS (usando palabras clave)
+            if not respuesta_encontrada and palabras_clave_str:
+                try:
+                    productos_encontrados, max_price = obtener_productos_desde_query(palabras_clave_str)
+                    if productos_encontrados and productos_encontrados.exists():
+                        respuesta_encontrada = generar_respuesta_con_links(productos_encontrados, max_price)
+                        respuesta_tipo = 'html'
+                        print(f"Respuesta encontrada (Productos)")
+                        return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
+                except Exception as e_prod:
+                     print(f"Error buscando productos: {e_prod}")
+
+            # 5. BUSCAR CATEGORÍA EXACTA (usando palabras clave)
+            if not respuesta_encontrada and palabras_clave_str and Category and Category.objects:
+                try:
+                    for category in Category.objects.all():
+                        nombre_categoria_norm = unidecode(category.name.lower())
+                        if palabras_clave_str == nombre_categoria_norm:
+                            category_url = reverse("products:products_by_category", args=[category.slug])
+                            respuesta_encontrada = f"Entendido. Aquí tienes la categoría <a href='{category_url}'>{category.name}</a>."
+                            respuesta_tipo = 'html'
+                            print(f"Respuesta encontrada (Categoría Exacta)")
+                            return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
+                except Exception as e_cat:
+                    print(f"Error buscando categoría exacta: {e_cat}")
+
+            # 6. MANEJAR INTENCIONES CONVERSACIONALES ESPECÍFICAS (ej: envío, saludo, despedida)
+            if not respuesta_encontrada:
+                respuesta_conversacional_especifica = responder_usuario(query_corregida) # Esta función SÓLO maneja cosas como envío, saludo, despedida, ayuda
+                if respuesta_conversacional_especifica:
+                    respuesta_encontrada = respuesta_conversacional_especifica
+                    respuesta_tipo = 'text'
+                    print(f"Respuesta encontrada (Conversacional Específica)")
+                    return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
+
+            # --- SI NADA DE LO ANTERIOR FUNCIONÓ ---
+
+            # 7. INTENTAR CON CHATTERBOT PARA CONVERSACIÓN GENERAL (Usar query_corregida)
+            #    Este es el nuevo paso para conversaciones básicas.
+            if not respuesta_encontrada:
+                try:
+                    # Usar la instancia de chatbot definida globalmente en views.py
+                    response_chatterbot = chatbot.get_response(query_corregida)
+
+                    # Usar un umbral de confianza para decidir si la respuesta es relevante
+                    # Puedes ajustar este valor (0.40 a 0.70 es un rango común)
+                    CONFIDENCE_THRESHOLD = 0.50
+                    if response_chatterbot and response_chatterbot.confidence >= CONFIDENCE_THRESHOLD:
+                        respuesta_encontrada = str(response_chatterbot)
+                        respuesta_tipo = 'text'
+                        print(f"Respuesta encontrada (ChatterBot General): Confianza {response_chatterbot.confidence:.2f}")
+                        # ¡Importante! Guardar la pregunta y respuesta para que aprenda (si no está en read_only)
+                        # chatbot.learn_response(response_chatterbot, query_corregida) # Opcional: aprendizaje dinámico
+                        return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
+                    else:
+                         confidence_val = response_chatterbot.confidence if response_chatterbot else 'N/A'
+                         print(f"ChatterBot respondió con baja confianza ({confidence_val}). Ignorando respuesta general.")
+                except Exception as e_cb:
+                     print(f"Error al obtener respuesta de ChatterBot: {e_cb}")
+
+            # 8. FALLBACK FINAL: Enlace a búsqueda general (usando palabras clave si existen)
+            if not respuesta_encontrada:
+                # ... (código del fallback con enlace a /search/ sin cambios) ...
+                termino_busqueda_url = palabras_clave_str if palabras_clave_str else query_corregida
+                if not termino_busqueda_url: termino_busqueda_url = query
+                try:
+                    search_url = f"{reverse('products:search')}?q={quote_plus(termino_busqueda_url)}"
+                    respuesta_fallback = (
+                        f"No encontré una respuesta directa para '{query}'.<br>"
+                        f"Puedes <a href='{search_url}'>buscar '{termino_busqueda_url}' en toda la tienda</a> "
+                        f"o intentar reformular tu pregunta."
+                    )
+                    respuesta_encontrada = respuesta_fallback
+                    respuesta_tipo = 'html'
+                    guardar_pregunta_desconocida(query)
+                    print(f"Respuesta (Fallback a Búsqueda)")
+                    return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
+                except Exception as e_search:
+                    print(f"Error crítico generando URL de búsqueda: {e_search}")
+                    respuesta_error_final = "Lo siento, tuve problemas para procesar tu solicitud. Por favor, intenta buscar manualmente."
+                    guardar_pregunta_desconocida(f"{query} [ERROR FALLBACK]")
+                    return JsonResponse({'success': True, 'response': respuesta_error_final, 'type': 'text'})
+
+            # Seguridad por si acaso
+            print("WARN: Se alcanzó el final de chatbot_query sin devolver respuesta.")
+            return JsonResponse({'success': False, 'error': 'Flujo de respuesta incompleto.'})
+
+        # ... (Manejo de excepciones JSONDecodeError y Exception general sin cambios) ...
+        except json.JSONDecodeError:
+             print("Error: Recibido JSON inválido.")
+             return JsonResponse({'success': False, 'error': 'Error decodificando JSON.'}, status=400)
+        except Exception as e:
+            print(f"ERROR INESPERADO en chatbot_query: {str(e)}\n{traceback.format_exc()}")
+            return JsonResponse({'success': False, 'error': 'Ha ocurrido un error interno en el servidor.'}, status=500)
+
+    return JsonResponse({'success': False, 'error': 'Método no permitido. Usa POST.'}, status=405)
+
+
+def responder_chatbot(request):#30
+    if request.method == "POST":
+        mensaje_usuario = request.POST.get("message", "")
+        respuesta = chatbot_instance.get_response(mensaje_usuario)
+        return JsonResponse({"response": str(respuesta)})
+
+def train_bot_view(request):
+     # Lógica para (re)entrenar el bot si es necesario
+     pass
+#
+## ========== NLP FUNCTIONS ==========
+#
+#def generar_sinonimos(frase):
+#    palabras = frase.lower().split()
+#    frases_sinonimos = []
+#    for i, palabra in enumerate(palabras):
+#        sinonimos = wordnet.synsets(palabra)
+#        sinonimos = set(chain.from_iterable([s.lemma_names() for s in sinonimos]))
+#        for sinonimo in sinonimos:
+#            nueva = palabras.copy()
+#            nueva[i] = sinonimo.replace('_', ' ')
+#            frases_sinonimos.append(" ".join(nueva))
+#    return list(set(frases_sinonimos))
+
+#def detectar_intencion(texto):
+#    texto_corregido = corregir_con_regex(texto, correcciones)
+#    texto_preprocesado = ' '.join(preprocesar_texto(texto_corregido))
+#    if re.search(r'\b(hola|buenas|ola|klk|holi)\b', texto_preprocesado):
+#        return "saludo"
+#    if re.search(r'\b(adios|chao|nos vemos|bye)\b', texto_preprocesado):
+#        return "despedida"
+#    if re.search(r'\b(tienen|quiero|busco|venden|hay|tienen envio)\b', texto_preprocesado):
+#        return "pregunta_producto"
+#    if re.search(r'\b(precio|cuesta|vale|cuánto)\b', texto_preprocesado):
+#        return "pregunta_precio"
+#    if re.search(r'\b(envio|envían|mandan|llegan)\b', texto_preprocesado):
+#        return "pregunta_envio"
+#    if re.search(r'\b(jajaja|xd|wtf|lol)\b', texto_preprocesado):
+#        return "chiste"
+#    return "intencion_desconocida"
+#
+#def extraer_palabras_clave(texto_usuario):
+#    """
+#    Limpia la consulta del usuario para extraer solo las palabras clave
+#    relevantes para la búsqueda de productos o categorías.
+#    """
+#    # 1. Aplicar correcciones existentes (ej: miencraft -> minecraft)
+#    #    Asumimos que texto_usuario ya pasó por corregir_con_regex
+#    texto_limpio = texto_usuario.lower()
+#
+#    # 2. Procesar con Spacy para lematización y análisis
+#    doc = nlp(texto_limpio)
+#
+#    palabras_clave = []
+#    for token in doc:
+#        # Usamos el lema (forma base de la palabra) para normalizar
+#        lema = token.lemma_
+#        # Verificamos si el lema o el texto original están en la lista a ignorar
+#        # También ignoramos puntuación y espacios
+#        if not token.is_punct and not token.is_space and \
+#           lema not in PALABRAS_A_IGNORAR and \
+#           token.text not in PALABRAS_A_IGNORAR:
+#            # Añadimos el texto original para conservar términos como "gaming"
+#            palabras_clave.append(token.text)
+#
+#    return " ".join(palabras_clave).strip()
+#
+#
+#def detectar_producto(texto):
+#    texto_corregido = corregir_con_regex(texto, correcciones)
+#    for producto, sinonimos in sinonimos_productos.items():
+#        for s in sinonimos:
+#            if re.search(r'\b' + re.escape(s) + r'\b', texto_corregido):
+#                return producto
+#    return None
+
+#def detectar_busqueda(texto_usuario):
+#    texto = texto_usuario.lower()
+#    for trigger in BUSQUEDA_TRIGGERS:
+#        if trigger in texto:
+#            partes = texto.split(trigger, 1)
+#            if len(partes) > 1:
+#                producto = partes[1].strip()
+#                if producto:
+#                    return f"¡Entendido! Puedes buscar '{producto}' desde la barra de búsqueda 🔍 en la parte superior de la página."
+#
+#    # Fallback con PRODUCTOS
+#    for prod in PRODUCTOS:
+#        if prod in texto:
+#            return f"¡Claro! Puedes buscar '{prod}' desde la barra de búsqueda 🔍 en la parte superior de la página."
+#
+#    return None
+
+## ========== DJANGO VIEW ==========
+
+#
+## ========== RESPUESTAS DINAMICAS - RESPUESTAS ESTATICAS ==========
+#def obtener_productos_desde_query(query):
+#    query = query.lower()
+#
+#
+#    price_pattern = r'menos de (\d+)|bajo (\d+)|maximo (\d+)|hasta (\d+)'
+#    price_match = re.search(price_pattern, query)
+#    max_price = None
+#
+#    if price_match:
+#        for group in price_match.groups():
+#            if group is not None:
+#                max_price = int(group) * 1000
+#                break
+#
+#    products_query = Product.objects.filter(is_available=True)
+#    category_filter_applied = False
+#
+#    for keyword, category_name in category_keywords.items():
+#        if keyword in query:
+#            if category_name:
+#                try:
+#                    category = Category.objects.get(name=category_name)
+#                    products_query = products_query.filter(category=category)
+#                    category_filter_applied = True
+#                except Category.DoesNotExist:
+#                    pass
+#            else:
+#                products_query = products_query.filter(name__icontains=keyword)
+#                category_filter_applied = True
+#
+#    if not category_filter_applied:
+#        keywords = [word for word in query.split() if len(word) >= 3]
+#        for keyword in keywords:
+#            products_query = products_query.filter(
+#                models.Q(name__icontains=keyword) |
+#                models.Q(description__icontains=keyword)
+#            )
+#
+#    if max_price:
+#        products_query = products_query.filter(price__lte=max_price)
+#
+#    return products_query[:5], max_price
+#
+#def chatbot_response(request):
+#    if request.method == "POST":
+#        user_input = request.POST.get("message", "").lower()
+#
+#        # Respuestas estáticas
+#        if "inicio" in user_input:
+#            return JsonResponse({"response": reverse("products:index")})
+#        if "ver productos" in user_input or "todos los productos" in user_input:
+#            return JsonResponse({"response": reverse("products:product_list")})
+#
+#        # PRIMERO: intenta detectar productos desde el query personalizado
+#        productos, max_price = obtener_productos_desde_query(user_input)
+#        if productos.exists():
+#            respuesta = generar_respuesta_con_links(productos, max_price)
+#            return JsonResponse({"response": respuesta})
+#
+#        # SI NO: intenta detectar si se refiere a una categoría exacta
+#        for category in Category.objects.all():
+#            if category.name.lower() in user_input:
+#                return JsonResponse({
+#                    "response": reverse("products:products_by_category", args=[category.slug])
+#                })
+#
+#        # POR ÚLTIMO: Fallback a búsqueda general
+#        return JsonResponse({
+#            "response": f"{reverse('products:search')}?q={user_input}"
+#        })
+#
+#def detectar_busqueda(texto_usuario):
+#    patron = r"(busco|estoy buscando|quiero ver|necesito) (una|un|unos|unas)? (.+)"
+#    match = re.search(patron, texto_usuario, re.IGNORECASE)
+#    if match:
+#        producto = match.group(3)
+#        return f"¡Entendido! Puedes buscar '{producto}' desde la barra de búsqueda 🔍 en la parte superior de la página."
+#    return None
+
+#def detectar_productos(texto):
+#    texto_corregido = corregir_con_regex(texto, correcciones)
+#    encontrados = set()
+#    for producto, sinonimos in sinonimos_productos.items():
+#        for s in sinonimos:
+#            if re.search(r'\b' + re.escape(s) + r'\b', texto_corregido):
+#                encontrados.add(producto)
+#    return list(encontrados)
+#
+
+
+# mismo proceso de antes comentada vs sin comentada , la cosa es que segun yo la comentada no funciona invidualmente por que al reemplazarlas en donde corresponde me salia error lo que significa que seguro depende de otra cosa entonces  quiero que evalues que es  cual es mejor y todo eso pero además quiero que reformatees para que salga 1 unica version que combina ambass (la parte sin comentar es la que sirve ) y que  agrego que  la comentada  se supone deberia de tener cosas "nuevas" o funciones que en la activa no existen
