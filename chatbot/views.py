@@ -4,6 +4,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import redirect # Más directo para redirecciones
 from django.http import JsonResponse
 from urllib.parse import quote_plus
+from products.models import Product
 from django.shortcuts import render
 from nltk.corpus import wordnet
 from django.urls import reverse
@@ -20,296 +21,6 @@ import nltk
 import json
 import re
 import os
-
- # ! error
-#
-## ##########################################
-##      CONFIGURACIÓN INICIAL Y GLOBALES
-## ##########################################
-#
-## --- Carga de Modelo Spacy ---
-#NLP_MODEL_NAME = "es_core_news_sm"
-#try: #2
-#    nlp = spacy.load(NLP_MODEL_NAME)
-#except OSError:
-#    print(f"Modelo Spacy '{NLP_MODEL_NAME}' no encontrado. Intentando descargar...")
-#    try:
-#        spacy.cli.download(NLP_MODEL_NAME)
-#        import importlib
-#        module = importlib.import_module(NLP_MODEL_NAME)
-#        nlp = module.load()
-#        print(f"Modelo '{NLP_MODEL_NAME}' descargado y cargado.")
-#    except Exception as e:
-#        print(f"FATAL: Error al descargar/cargar modelo Spacy '{NLP_MODEL_NAME}': {e}")
-#        nlp = None
-#if not nlp:
-#     print("⚠️ADVERTENCIA: El modelo NLP de Spacy no está cargado. Funcionalidades como extracción de palabras clave fallarán.")
-#
-#
-## --- Vocabulario y Constantes ---
-
-## ##########################################
-##          FUNCIONES HELPER
-## ##########################################
-#
-## --- Función de Logging (Requisito 1) ---
-
-#def extraer_palabras_clave(texto_usuario): #20 (Extractor de Keywords - Mejorado)
-#    """
-#    Limpia la consulta del usuario para extraer solo las palabras clave
-#    relevantes para la búsqueda de productos o categorías.
-#    Asume que el texto ya pasó por corregir_con_regex.
-#    """
-#    global nlp # Asegúrate de que 'nlp' esté cargado (ej: spacy.load('es_core_news_sm'))
-#    if not nlp or not texto_usuario or not isinstance(texto_usuario, str):
-#        return ""
-#
-#    texto_limpio = unidecode(texto_usuario.lower())
-#    doc = nlp(texto_limpio)
-#
-#    palabras_clave = [
-#        token.lemma_ for token in doc
-#        if not token.is_punct and not token.is_space and
-#           token.lemma_ not in PALABRAS_A_IGNORAR and
-#           token.text not in PALABRAS_A_IGNORAR
-#    ]
-#    return " ".join(palabras_clave).strip()
-#
-#def detectar_intencion(texto): #22 (Detector Intención Básica - Mejorado)
-#    """Detecta intenciones básicas (saludo, despedida, envío, ayuda)."""
-#    if not texto or not isinstance(texto, str):
-#        return "intencion_desconocida"
-#
-#    texto_normalizado = unidecode(corregir_con_regex(texto, correcciones).lower())
-#
-#    if any(saludo in texto_normalizado for saludo in SALUDOS):
-#        return "saludo"
-#    if any(despedida in texto_normalizado for despedida in DESPEDIDAS):
-#        return "despedida"
-#    if any(ayuda in texto_normalizado for ayuda in AYUDA):
-#        return "ayuda"
-#    if es_pregunta_envio(texto_normalizado): # Usar función específica para envíos
-#        return "pregunta_envio"
-#
-#    return "intencion_desconocida" # Por defecto
-#
-
-# ! da error
-#def generar_respuesta_con_links(products, max_price=None):  # 27 (Generador HTML links - Mejorado)
-#    """Formatea respuesta HTML con enlaces a productos."""
-#    # Requisito 3: Lenguaje Natural
-#    intros = [
-#        "He encontrado estos productos que podrían interesarte:<br>",
-#        "Aquí tienes algunos productos relacionados con tu búsqueda:<br>",
-#        "¡Claro! Echa un vistazo a estos:<br>",
-#        "Estos productos coinciden con lo que buscas:<br>"
-#    ]
-#    intro_precio = [
-#        f"Encontré estos productos por menos de ${max_price:<,.0f}:<br>",
-#        f"Aquí tienes opciones por debajo de ${max_price:<,.0f}:<br>"
-#    ]
-#
-#    response = random.choice(intro_precio) if max_price is not None else random.choice(intros)
-#
-#    for product in products:
-#        try:
-#            product_url = reverse('products:product_detail', args=[product.category.slug, product.slug])
-#            price_formatted = '{:,.0f}'.format(product.price).replace(',', '.')
-#            response += f"• <a href='{product_url}' target='_blank'>{product.name}</a> (${price_formatted})<br>"  # Abrir en nueva pestaña
-#        except Exception as e:
-#            print(f"Error generando URL para {product.slug}: {e}")
-#            price_formatted = '{:,.0f}'.format(product.price).replace(',', '.')
-#            response += f"• {product.name} (${price_formatted}) [Error enlace]<br>"
-#
-#    if products.count() >= 5:
-#        response += "<br>Estos son solo algunos. ¡Si no es lo que buscas, dime más detalles!"
-#    elif not products.exists():  # Seguridad, aunque no debería llegar aquí
-#        return "Vaya, parece que no encontré productos exactos para eso."
-#
-#    return response
-# ! arriba
-#
-#def responder_usuario(texto_corregido):  # 28 (Manejador Conversación Específica - Mejorado)
-#    """Maneja intenciones conversacionales básicas y predefinidas."""
-#    intencion = detectar_intencion(texto_corregido)
-#
-#    # Requisito 3: Lenguaje Natural (Respuestas variadas)
-#    if intencion == "saludo":
-#        respuestas = ["¡Hola! 👋 Bienvenido a TecLegacy. ¿Qué buscas hoy?", "¡Qué tal! 😊 ¿En qué puedo ayudarte?",
-#                      "¡Buenas! Listo para ayudarte a encontrar lo mejor en tecnología.",
-#                      "¡Hola! Dime qué producto tienes en mente."]
-#        return random.choice(respuestas)
-#    elif intencion == "despedida":
-#        respuestas = ["¡Hasta luego! Gracias por visitarnos. Vuelve pronto 😊", "¡Chao! Que tengas un excelente día.",
-#                      "¡Nos vemos! Si necesitas algo más, aquí estaré.", "¡Adiós! Espero haberte ayudado."]
-#        return random.choice(respuestas)
-#    elif intencion == "ayuda":
-#        respuestas = [
-#            "Soy tu asistente virtual en TecLegacy. Puedo buscar productos, categorías o ayudarte con preguntas sobre envíos. ¿Qué necesitas?",
-#            "¡Claro! Pregúntame por un producto (ej: 'laptop gamer Asus') o sobre nuestros envíos (ej: 'envían a Medellín?').",
-#            "Estoy aquí para ayudarte. Dime qué buscas o si tienes dudas sobre envíos."]
-#        return random.choice(respuestas)
-#    elif intencion == "pregunta_envio":
-#        pais_detectado = detectar_pais_en_mensaje(texto_corregido)
-#        if pais_detectado and pais_detectado != "colombia":
-#            pais_title = pais_detectado.title()
-#            return f"Qué pena, por ahora nuestros envíos son sólo dentro de Colombia 🇨🇴. No podemos enviar a {pais_title}."
-#        else:
-#            # Asumir Colombia si no se especifica otro país
-#            return "¡Sí! Hacemos envíos a toda Colombia 🇨🇴. ¡Anímate a comprar! ✈️📦"
-#    # Se podría añadir manejo para 'chiste' u otras intenciones básicas aquí
-#
-#    return None
-#
-## --- Vista del Chatbot (POST) ---
-#@csrf_exempt
-#def chatbot_query(request):
-#    """Maneja las consultas enviadas al widget del chatbot."""
-#    if request.method == 'POST':
-#        try:
-#            data = json.loads(request.body)
-#            query = data.get('query', '').strip()
-#
-#            # === REQUISITO 1: Registrar input del chatbot ===
-#            log_user_input(query, 'CHATBOT')
-#
-#            if not query: return JsonResponse({'success': True, 'response': "¿Disculpa? No recibí tu mensaje.", 'type': 'text'}) # Respuesta para query vacía
-#
-#            # 1. Corregir
-#            query_corregida = corregir_con_regex(query, correcciones)
-#
-#            # 2. Extraer Keywords
-#            palabras_clave_str = extraer_palabras_clave(query_corregida)
-#            print(f"[CHATBOT] Original: '{query}' | Corregida: '{query_corregida}' | Claves: '{palabras_clave_str}'")
-#
-#            respuesta_encontrada = None
-#            respuesta_tipo = 'text'
-#
-#            # 3. Intenciones Estáticas/Navegación
-#            if query_corregida in INTENCIONES["inicio"]: respuesta_encontrada, respuesta_tipo = reverse("products:index"), 'url'
-#            elif query_corregida in INTENCIONES["productos"]: respuesta_encontrada, respuesta_tipo = reverse("products:product_list"), 'url'
-#            elif query_corregida in INTENCIONES["login"]:
-#                 try: respuesta_encontrada, respuesta_tipo = reverse("login"), 'url'
-#                 except Exception: respuesta_encontrada, respuesta_tipo = "Puedes iniciar sesión o registrarte desde el menú superior.", 'text'
-#            if respuesta_encontrada: return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
-#
-#            # 4. Buscar Productos (BD)
-#            if not respuesta_encontrada and palabras_clave_str:
-#                productos, max_p = obtener_productos_desde_query(palabras_clave_str)
-#                if productos and productos.exists():
-#                    respuesta_encontrada, respuesta_tipo = generar_respuesta_con_links(productos, max_p), 'html'
-#                    return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
-#
-#            # 5. Buscar Categoría Exacta (BD)
-#            if not respuesta_encontrada and palabras_clave_str and Category and Category.objects:
-#                try:
-#                    # Busca una categoría cuyo nombre normalizado sea IGUAL a las palabras clave
-#                    categoria_encontrada = Category.objects.filter(name__iexact=palabras_clave_str).first()
-#                    if not categoria_encontrada: # Intenta quitando tildes si no encontró exacto
-#                         categoria_encontrada = next((cat for cat in Category.objects.all() if unidecode(cat.name.lower()) == unidecode(palabras_clave_str)), None)
-#
-#                    if categoria_encontrada:
-#                        cat_url = reverse("products:products_by_category", args=[categoria_encontrada.slug])
-#                        respuesta_encontrada = f"¡Claro! Aquí tienes todo sobre <a href='{cat_url}' target='_blank'>{categoria_encontrada.name}</a>."
-#                        respuesta_tipo = 'html'
-#                        return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
-#                except Exception as e_cat: print(f"Error buscando categoría exacta: {e_cat}")
-#
-#            # 6. Intenciones Conversacionales Específicas
-#            if not respuesta_encontrada:
-#                respuesta_conv_esp = responder_usuario(query_corregida)
-#                if respuesta_conv_esp:
-#                    respuesta_encontrada, respuesta_tipo = respuesta_conv_esp, 'text'
-#                    return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
-#
-#            # 7. Conversación General (ChatterBot)
-#            if not respuesta_encontrada:
-#                try:
-#                    response_cb = chatbot.get_response(query_corregida)
-#                    CONFIDENCE_THRESHOLD = 0.50 # Umbral de confianza (ajustar)
-#                    if response_cb and response_cb.confidence >= CONFIDENCE_THRESHOLD:
-#                        respuesta_encontrada, respuesta_tipo = str(response_cb), 'text'
-#                        print(f"[CHATBOT] Respuesta ChatterBot (Conf: {response_cb.confidence:.2f})")
-#                        return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
-#                    else: print(f"[CHATBOT] ChatterBot baja confianza ({response_cb.confidence if response_cb else 'N/A'})")
-#                except Exception as e_cb: print(f"Error con ChatterBot: {e_cb}")
-#
-#            # 8. Fallback Final (Link a Búsqueda General)
-#            if not respuesta_encontrada:
-#                termino_busqueda_url = palabras_clave_str if palabras_clave_str else query_corregida
-#                if not termino_busqueda_url: termino_busqueda_url = query
-#                try:
-#                    search_url = f"{reverse('products:search')}?q={quote_plus(termino_busqueda_url)}"
-#                    respuestas_fallback = [
-#                        f"Hmm, no encontré algo específico para '{query}'. ¿Qué tal si pruebas <a href='{search_url}' target='_blank'>buscar '{termino_busqueda_url}' en la tienda</a>?",
-#                        f"No estoy seguro sobre '{query}'. Puedes <a href='{search_url}' target='_blank'>ver los resultados para '{termino_busqueda_url}' aquí</a> o reformular tu pregunta.",
-#                        f"Para '{query}', te sugiero <a href='{search_url}' target='_blank'>usar la búsqueda general con '{termino_busqueda_url}'</a>."
-#                    ]
-#                    respuesta_encontrada = random.choice(respuestas_fallback)
-#                    respuesta_tipo = 'html'
-#                    guardar_pregunta_desconocida(query)
-#                    print(f"[CHATBOT] Fallback a búsqueda: Termino '{termino_busqueda_url}'")
-#                    return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
-#                except Exception as e_search:
-#                    print(f"Error generando URL fallback: {e_search}")
-#                    respuesta_encontrada = "Lo siento, tuve problemas procesando eso. Intenta buscar manualmente."
-#                    guardar_pregunta_desconocida(f"{query} [ERROR FALLBACK]")
-#                    return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': 'text'})
-#
-#            # Seguridad (no debería llegar aquí)
-#            return JsonResponse({'success': False, 'error': 'Error inesperado en flujo.'}, status=500)
-#
-#        except json.JSONDecodeError:
-#             print("[CHATBOT] Error: JSON inválido recibido.")
-#             return JsonResponse({'success': False, 'error': 'Error en formato de datos.'}, status=400)
-#        except Exception as e:
-#            print(f"ERROR FATAL en chatbot_query: {str(e)}\n{traceback.format_exc()}")
-#            return JsonResponse({'success': False, 'error': 'Error interno del servidor.'}, status=500)
-#
-#    return JsonResponse({'success': False, 'error': 'Método no permitido.'}, status=405)
-#
-#
-## --- Vista para la Barra de Búsqueda (GET) (Requisito 2) ---
-#def search_redirect_view(request):
-#    """
-#    Procesa la consulta de la barra de búsqueda principal, extrae keywords
-#    y redirige a la página de resultados de búsqueda de Django.
-#    """
-#    raw_query = request.GET.get('q', '').strip()
-#
-#    # === REQUISITO 1: Registrar input de la barra de búsqueda ===
-#    log_user_input(raw_query, 'SEARCH_BAR')
-#
-#    if not raw_query:
-#        # Si no hay consulta, redirigir a la lista de productos o a donde prefieras
-#        print("[SEARCH_BAR] Consulta vacía, redirigiendo a lista de productos.")
-#        return redirect(reverse('products:product_list'))
-#
-#    query_corregida = corregir_con_regex(raw_query, correcciones)
-#    palabras_clave_str = extraer_palabras_clave(query_corregida)
-#    termino_busqueda_final = palabras_clave_str if palabras_clave_str else query_corregida
-#    if not termino_busqueda_final: termino_busqueda_final = raw_query
-#
-#    print(f"[SEARCH_BAR] Original: '{raw_query}' | Corregida: '{query_corregida}' | Claves: '{palabras_clave_str}' | Final: '{termino_busqueda_final}'")
-#
-#    # 3. Construir URL y Redirigir
-#    try:
-#        # Asume que tienes una URL nombrada 'products:search' que maneja la búsqueda GET
-#        search_results_url = f"{reverse('products:search')}?q={quote_plus(termino_busqueda_final)}"
-#        print(f"[SEARCH_BAR] Redirigiendo a: {search_results_url}")
-#        # Usar HttpResponseRedirect o redirect
-#        return redirect(search_results_url)
-#        # return HttpResponseRedirect(search_results_url)
-#
-#    except Exception as e:
-#        print(f"Error generando URL de redirección de búsqueda: {e}\n{traceback.format_exc()}")
-#        # Fallback si falla la generación de URL (ej. a la home)
-#        try:
-#            fallback_url = reverse('products:index')
-#        except Exception:
-#            fallback_url = '/' # Último recurso
-#        return redirect(fallback_url)
-# ! error
 
 try:
     from products.models import Product, Category
@@ -331,8 +42,8 @@ except ImportError:
         def __getitem__(self, key): return []
     Product = Category = DummyModel()
 
-
 # ========== Cargar Modelo Spacy ==========
+
 NLP_MODEL_NAME = "es_core_news_sm"
 try:#2
     nlp = spacy.load(NLP_MODEL_NAME)
@@ -348,8 +59,8 @@ except OSError:
         print("El chatbot podría no funcionar correctamente sin el modelo NLP.")
         nlp = None # Marcar que nlp no está disponible
 
-
 # ========== CHATBOT SETUP ==========
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR,'chatbot_db.sqlite3')
 chatbot = ChatBot(
@@ -446,8 +157,7 @@ correcciones = {#10
     "bno": "bueno","klk": "¿qué tal?","intel i5": "Intel i5","intel i7": "Intel i7","disco duro externo": "HDD externo",
     "memoria externa": "almacenamiento externo","microfon": "micrófono","micro": "micrófono","cascos": "audífonos",
     "auris gamer": "auriculares gamer","lsta":"lista","articulso":"articulos","lapto":"laptop","laotop":"laptop",
-    "compu":"computador",
-
+    "compu":"computador","telcado":"teclado","raotn":"ratón"
 }
 
 # Diccionario de sinónimos para normalizar términos de productos
@@ -622,7 +332,6 @@ def guardar_pregunta_desconocida(pregunta): #17 (Guardar pregunta no entendida)
     except Exception as e:
         print(f"Error al guardar pregunta desconocida: {e}")
 
-
 def corregir_con_regex(texto, dict_correcciones): #18
     """Aplica correcciones básicas usando un diccionario y regex."""
     if not texto or not isinstance(texto, str):
@@ -660,9 +369,8 @@ def extraer_palabras_clave(texto_usuario):#20
            token.text not in PALABRAS_A_IGNORAR:
             palabras_clave.append(token.text)
     resultado = " ".join(palabras_clave).strip()
-    #resultado = " ".join(list(dict.fromkeys(resultado.split())))
+    resultado = " ".join(list(dict.fromkeys(resultado.split())))
     return resultado
-
 
 def es_pregunta_envio(mensaje):#21
     """Verifica si el mensaje contiene palabras clave de envío."""
@@ -712,7 +420,6 @@ def detectar_marca(texto):#25
         if re.search(r'\b' + re.escape(marca) + r'\b', texto_lower):
             return marca
     return None
-
 
 # ========== FUNCIONES DE LÓGICA DEL CHATBOT ==========
 
@@ -772,7 +479,6 @@ def obtener_productos_desde_query(palabras_clave_query):#26
                     break
 
     # 2. Filtrar por nombre/descripción/slug usando las palabras clave restantes
-    #    (O todas si no hubo filtro de categoría)
     search_keywords = [word for word in query.split() if len(word) >= 2] # Mínimo 2 caracteres
     if search_keywords:
         filter_q = Q()
@@ -781,8 +487,6 @@ def obtener_productos_desde_query(palabras_clave_query):#26
             filter_q |= Q(name__icontains=keyword) | \
                         Q(description__icontains=keyword) | \
                         Q(slug__icontains=keyword)
-            # Podríamos añadir búsqueda en marca si tienes un campo 'brand' en Product
-            # filter_q |= Q(brand__icontains=keyword)
 
         # Aplicar el filtro Q
         products_query = products_query.filter(filter_q)
@@ -800,11 +504,80 @@ def obtener_productos_desde_query(palabras_clave_query):#26
         print(f"Aplicado filtro de precio: <= {max_price}")
 
     # Evitar duplicados y limitar resultados
-    # Ordenar por relevancia podría ser complejo, por ahora sin orden específico o por nombre
-    final_query = products_query.distinct().order_by('name')[:5] # Mostrar hasta 5
+    final_query = products_query.distinct().order_by('name')[:4]
 
     return final_query, max_price
 
+def obtener_productos_desde_query_navbar(palabras_clave_query):#26
+
+    if not Product or not Product.objects:
+        print("WARN: Modelo Product no disponible para búsqueda.")
+        return Product.objects.none(), None
+
+    query = palabras_clave_query.lower().strip()
+    max_price = None
+    price_pattern = r'(?:menos de|bajo|maximo|hasta)\s*(\d+)\s*(k|mil)?'
+    price_match = re.search(price_pattern, query)
+
+    if price_match:
+        price_value = int(price_match.group(1))
+        multiplier = 1000 if price_match.group(2) in ['k', 'mil'] else 1
+        max_price = price_value * multiplier
+        query = re.sub(price_pattern, '', query).strip()
+        print(f"Detectado precio máximo: {max_price}")
+
+    products_query = Product.objects.filter(is_available=True)
+    category_filter_applied = False
+    keywords_used_for_filter = False
+
+    keywords_in_query = query.split()
+    found_category = None
+    for keyword in keywords_in_query:
+        if keyword in category_keywords and category_keywords[keyword]:
+            category_name = category_keywords[keyword]
+            try:
+                category = Category.objects.get(name__iexact=category_name)
+                products_query = products_query.filter(category=category)
+                category_filter_applied = True
+                keywords_used_for_filter = True
+                found_category = category_name
+                print(f"Filtrado por categoría '{category_name}' debido a keyword '{keyword}'")
+                break
+            except Category.DoesNotExist:
+                print(f"WARN: Categoría '{category_name}' mapeada pero no encontrada en BD.")
+            except Category.MultipleObjectsReturned:
+                 print(f"WARN: Múltiples categorías encontradas para '{category_name}'. Usando la primera.")
+                 category = Category.objects.filter(name__iexact=category_name).first()
+                 if category:
+                    products_query = products_query.filter(category=category)
+                    category_filter_applied = True
+                    keywords_used_for_filter = True
+                    found_category = category_name
+                    break
+
+    search_keywords = [word for word in query.split() if len(word) >= 2] # Mínimo 2 caracteres
+    if search_keywords:
+        filter_q = Q()
+        for keyword in search_keywords:
+            filter_q |= Q(name__icontains=keyword) | \
+                        Q(description__icontains=keyword) | \
+                        Q(slug__icontains=keyword)
+
+        products_query = products_query.filter(filter_q)
+        keywords_used_for_filter = True
+        print(f"Filtrado por keywords (OR) en nombre/desc/slug: {search_keywords}")
+
+    if not category_filter_applied and not keywords_used_for_filter and query:
+         products_query = products_query.filter(Q(name__icontains=query) | Q(description__icontains=query))
+         print(f"Filtrado general por query completa (fallback): {query}")
+
+    if max_price is not None:
+        products_query = products_query.filter(price__lte=max_price)
+        print(f"Aplicado filtro de precio: <= {max_price}")
+
+    final_query = products_query.distinct().order_by('name')[:16]
+
+    return final_query, max_price
 
 def generar_respuesta_con_links(products, max_price=None):#27
     """Formatea la respuesta del chatbot con enlaces a los productos encontrados."""
@@ -822,18 +595,14 @@ def generar_respuesta_con_links(products, max_price=None):#27
     # Construir la lista de productos con enlaces y precios
     for product in products:
         try:
-            # Generar URL del producto (asume que tienes una URL nombrada 'product_detail')
-            # Necesitas pasar los slugs correctos según tu URL pattern
             product_url = reverse('products:product_detail', args=[product.category.slug, product.slug])
             price_formatted = '{:,.0f}'.format(product.price).replace(',', '.')
-            # Usar <a target="_blank"> para abrir en nueva pestaña es opcional
             response += f"- <a href='{product_url}'>{product.name}</a> (${price_formatted})<br>"
         except Exception as e:
             print(f"Error al generar URL para producto {product.slug}: {e}")
             # Mostrar el producto sin enlace si falla la URL
             price_formatted = '{:,.0f}'.format(product.price).replace(',', '.')
             response += f"- {product.name} (${price_formatted}) [Error al generar enlace]<br>"
-
 
     if products.count() >= 5: # Si se alcanzó el límite de 5
         response += "<br>Estos son algunos resultados. Puedes ser más específico o usar la barra de búsqueda principal."
@@ -869,7 +638,6 @@ def responder_usuario(texto_corregido):  # 28 (Manejador Conversación Específi
             return "¡Sí! Hacemos envíos a toda Colombia 🇨🇴. ¡Anímate a comprar! ✈️📦"
     # Se podría añadir manejo para 'chiste' u otras intenciones básicas aquí
     return None
-
 
 # ========== VISTA PRINCIPAL DEL CHATBOT ==========
 
@@ -938,21 +706,16 @@ def chatbot_query(request):#29
             # --- SI NADA DE LO ANTERIOR FUNCIONÓ ---
 
             # 7. INTENTAR CON CHATTERBOT PARA CONVERSACIÓN GENERAL (Usar query_corregida)
-            #    Este es el nuevo paso para conversaciones básicas.
             if not respuesta_encontrada:
                 try:
-                    # Usar la instancia de chatbot definida globalmente en views.py
                     response_chatterbot = chatbot.get_response(query_corregida)
 
-                    # Usar un umbral de confianza para decidir si la respuesta es relevante
-                    # Puedes ajustar este valor (0.40 a 0.70 es un rango común)
-                    CONFIDENCE_THRESHOLD = 0.50
+                    CONFIDENCE_THRESHOLD = 0.90
                     if response_chatterbot and response_chatterbot.confidence >= CONFIDENCE_THRESHOLD:
                         respuesta_encontrada = str(response_chatterbot)
                         respuesta_tipo = 'text'
                         print(f"Respuesta encontrada (ChatterBot General): Confianza {response_chatterbot.confidence:.2f}")
-                        # ¡Importante! Guardar la pregunta y respuesta para que aprenda (si no está en read_only)
-                        # chatbot.learn_response(response_chatterbot, query_corregida) # Opcional: aprendizaje dinámico
+                        chatbot.learn_response(response_chatterbot, query_corregida) # Opcional: aprendizaje dinámico
                         return JsonResponse({'success': True, 'response': respuesta_encontrada, 'type': respuesta_tipo})
                     else:
                          confidence_val = response_chatterbot.confidence if response_chatterbot else 'N/A'
@@ -962,7 +725,6 @@ def chatbot_query(request):#29
 
             # 8. FALLBACK FINAL: Enlace a búsqueda general (usando palabras clave si existen)
             if not respuesta_encontrada:
-                # ... (código del fallback con enlace a /search/ sin cambios) ...
                 termino_busqueda_url = palabras_clave_str if palabras_clave_str else query_corregida
                 if not termino_busqueda_url: termino_busqueda_url = query
                 try:
@@ -997,7 +759,6 @@ def chatbot_query(request):#29
 
     return JsonResponse({'success': False, 'error': 'Método no permitido. Usa POST.'}, status=405)
 
-
 def responder_chatbot(request):#30
     if request.method == "POST":
         mensaje_usuario = request.POST.get("message", "")
@@ -1007,182 +768,46 @@ def responder_chatbot(request):#30
 def train_bot_view(request):
      # Lógica para (re)entrenar el bot si es necesario
      pass
-#
-## ========== NLP FUNCTIONS ==========
-#
-#def generar_sinonimos(frase):
-#    palabras = frase.lower().split()
-#    frases_sinonimos = []
-#    for i, palabra in enumerate(palabras):
-#        sinonimos = wordnet.synsets(palabra)
-#        sinonimos = set(chain.from_iterable([s.lemma_names() for s in sinonimos]))
-#        for sinonimo in sinonimos:
-#            nueva = palabras.copy()
-#            nueva[i] = sinonimo.replace('_', ' ')
-#            frases_sinonimos.append(" ".join(nueva))
-#    return list(set(frases_sinonimos))
 
-#def detectar_intencion(texto):
-#    texto_corregido = corregir_con_regex(texto, correcciones)
-#    texto_preprocesado = ' '.join(preprocesar_texto(texto_corregido))
-#    if re.search(r'\b(hola|buenas|ola|klk|holi)\b', texto_preprocesado):
-#        return "saludo"
-#    if re.search(r'\b(adios|chao|nos vemos|bye)\b', texto_preprocesado):
-#        return "despedida"
-#    if re.search(r'\b(tienen|quiero|busco|venden|hay|tienen envio)\b', texto_preprocesado):
-#        return "pregunta_producto"
-#    if re.search(r'\b(precio|cuesta|vale|cuánto)\b', texto_preprocesado):
-#        return "pregunta_precio"
-#    if re.search(r'\b(envio|envían|mandan|llegan)\b', texto_preprocesado):
-#        return "pregunta_envio"
-#    if re.search(r'\b(jajaja|xd|wtf|lol)\b', texto_preprocesado):
-#        return "chiste"
-#    return "intencion_desconocida"
-#
-#def extraer_palabras_clave(texto_usuario):
-#    """
-#    Limpia la consulta del usuario para extraer solo las palabras clave
-#    relevantes para la búsqueda de productos o categorías.
-#    """
-#    # 1. Aplicar correcciones existentes (ej: miencraft -> minecraft)
-#    #    Asumimos que texto_usuario ya pasó por corregir_con_regex
-#    texto_limpio = texto_usuario.lower()
-#
-#    # 2. Procesar con Spacy para lematización y análisis
-#    doc = nlp(texto_limpio)
-#
-#    palabras_clave = []
-#    for token in doc:
-#        # Usamos el lema (forma base de la palabra) para normalizar
-#        lema = token.lemma_
-#        # Verificamos si el lema o el texto original están en la lista a ignorar
-#        # También ignoramos puntuación y espacios
-#        if not token.is_punct and not token.is_space and \
-#           lema not in PALABRAS_A_IGNORAR and \
-#           token.text not in PALABRAS_A_IGNORAR:
-#            # Añadimos el texto original para conservar términos como "gaming"
-#            palabras_clave.append(token.text)
-#
-#    return " ".join(palabras_clave).strip()
-#
-#
-#def detectar_producto(texto):
-#    texto_corregido = corregir_con_regex(texto, correcciones)
-#    for producto, sinonimos in sinonimos_productos.items():
-#        for s in sinonimos:
-#            if re.search(r'\b' + re.escape(s) + r'\b', texto_corregido):
-#                return producto
-#    return None
+# =========== NavBar ================
 
-#def detectar_busqueda(texto_usuario):
-#    texto = texto_usuario.lower()
-#    for trigger in BUSQUEDA_TRIGGERS:
-#        if trigger in texto:
-#            partes = texto.split(trigger, 1)
-#            if len(partes) > 1:
-#                producto = partes[1].strip()
-#                if producto:
-#                    return f"¡Entendido! Puedes buscar '{producto}' desde la barra de búsqueda 🔍 en la parte superior de la página."
-#
-#    # Fallback con PRODUCTOS
-#    for prod in PRODUCTOS:
-#        if prod in texto:
-#            return f"¡Claro! Puedes buscar '{prod}' desde la barra de búsqueda 🔍 en la parte superior de la página."
-#
-#    return None
+@csrf_exempt
+def chatbot_search(request):
+    if request.method == 'POST':
+        try:
+            # Cambia esto para recibir JSON correctamente
+            data = json.loads(request.body)
+            query = data.get('query', '')
 
-## ========== DJANGO VIEW ==========
+            # Usa tus funciones existentes
+            query_corregida = corregir_con_regex(query, correcciones)
+            palabras_clave = extraer_palabras_clave(query_corregida)
+            productos, _ = obtener_productos_desde_query_navbar(palabras_clave)
 
-#
-## ========== RESPUESTAS DINAMICAS - RESPUESTAS ESTATICAS ==========
-#def obtener_productos_desde_query(query):
-#    query = query.lower()
-#
-#
-#    price_pattern = r'menos de (\d+)|bajo (\d+)|maximo (\d+)|hasta (\d+)'
-#    price_match = re.search(price_pattern, query)
-#    max_price = None
-#
-#    if price_match:
-#        for group in price_match.groups():
-#            if group is not None:
-#                max_price = int(group) * 1000
-#                break
-#
-#    products_query = Product.objects.filter(is_available=True)
-#    category_filter_applied = False
-#
-#    for keyword, category_name in category_keywords.items():
-#        if keyword in query:
-#            if category_name:
-#                try:
-#                    category = Category.objects.get(name=category_name)
-#                    products_query = products_query.filter(category=category)
-#                    category_filter_applied = True
-#                except Category.DoesNotExist:
-#                    pass
-#            else:
-#                products_query = products_query.filter(name__icontains=keyword)
-#                category_filter_applied = True
-#
-#    if not category_filter_applied:
-#        keywords = [word for word in query.split() if len(word) >= 3]
-#        for keyword in keywords:
-#            products_query = products_query.filter(
-#                models.Q(name__icontains=keyword) |
-#                models.Q(description__icontains=keyword)
-#            )
-#
-#    if max_price:
-#        products_query = products_query.filter(price__lte=max_price)
-#
-#    return products_query[:5], max_price
-#
-#def chatbot_response(request):
-#    if request.method == "POST":
-#        user_input = request.POST.get("message", "").lower()
-#
-#        # Respuestas estáticas
-#        if "inicio" in user_input:
-#            return JsonResponse({"response": reverse("products:index")})
-#        if "ver productos" in user_input or "todos los productos" in user_input:
-#            return JsonResponse({"response": reverse("products:product_list")})
-#
-#        # PRIMERO: intenta detectar productos desde el query personalizado
-#        productos, max_price = obtener_productos_desde_query(user_input)
-#        if productos.exists():
-#            respuesta = generar_respuesta_con_links(productos, max_price)
-#            return JsonResponse({"response": respuesta})
-#
-#        # SI NO: intenta detectar si se refiere a una categoría exacta
-#        for category in Category.objects.all():
-#            if category.name.lower() in user_input:
-#                return JsonResponse({
-#                    "response": reverse("products:products_by_category", args=[category.slug])
-#                })
-#
-#        # POR ÚLTIMO: Fallback a búsqueda general
-#        return JsonResponse({
-#            "response": f"{reverse('products:search')}?q={user_input}"
-#        })
-#
-#def detectar_busqueda(texto_usuario):
-#    patron = r"(busco|estoy buscando|quiero ver|necesito) (una|un|unos|unas)? (.+)"
-#    match = re.search(patron, texto_usuario, re.IGNORECASE)
-#    if match:
-#        producto = match.group(3)
-#        return f"¡Entendido! Puedes buscar '{producto}' desde la barra de búsqueda 🔍 en la parte superior de la página."
-#    return None
+            results = []
+            for p in productos[:15]:
+                try:
+                    results.append({
+                        "name": p.name,
+                        "price": float(p.price),  # Asegurar que es número
+                        "image": p.image.url if p.image else "/static/images/default-product.png",
+                        "url": reverse('products:product_detail', args=[p.category.slug, p.slug]),
+                        "category": p.category.name
+                    })
+                except Exception as e:
+                    print(f"Error procesando producto {p.id}: {str(e)}")
+                    continue
 
-#def detectar_productos(texto):
-#    texto_corregido = corregir_con_regex(texto, correcciones)
-#    encontrados = set()
-#    for producto, sinonimos in sinonimos_productos.items():
-#        for s in sinonimos:
-#            if re.search(r'\b' + re.escape(s) + r'\b', texto_corregido):
-#                encontrados.add(producto)
-#    return list(encontrados)
-#
+            return JsonResponse({
+                "success": True,
+                "query": query,
+                "products": results
+            })
 
+        except json.JSONDecodeError:
+            return JsonResponse({"success": False, "error": "JSON inválido"}, status=400)
+        except Exception as e:
+            print(f"Error en chatbot_search: {str(e)}")
+            return JsonResponse({"success": False, "error": str(e)}, status=500)
 
-# mismo proceso de antes comentada vs sin comentada , la cosa es que segun yo la comentada no funciona invidualmente por que al reemplazarlas en donde corresponde me salia error lo que significa que seguro depende de otra cosa entonces  quiero que evalues que es  cual es mejor y todo eso pero además quiero que reformatees para que salga 1 unica version que combina ambass (la parte sin comentar es la que sirve ) y que  agrego que  la comentada  se supone deberia de tener cosas "nuevas" o funciones que en la activa no existen
+    return JsonResponse({"success": False, "error": "Método no permitido"}, status=405)

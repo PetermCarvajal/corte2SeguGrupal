@@ -1,3 +1,4 @@
+# Obs Solo Obs Testeado Probado Pero no Implementado
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 import torch
 

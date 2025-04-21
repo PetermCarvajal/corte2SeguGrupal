@@ -2,7 +2,6 @@ from chatterbot import ChatBot
 from chatterbot.trainers import ListTrainer
 import os
 
-# Ruta absoluta hacia chatbot_db.sqlite3 dentro de la carpeta /chatbot
 base_dir = os.path.dirname(os.path.abspath(__file__))
 db_path = os.path.join(base_dir, 'chatbot_db.sqlite3')
 

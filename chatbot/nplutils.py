@@ -1,3 +1,5 @@
+# obs la pág completa
+
 import re
 import spacy
 from spacy.lang.es.stop_words import STOP_WORDS

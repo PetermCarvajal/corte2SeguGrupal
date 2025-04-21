@@ -7,8 +7,6 @@ class Command(BaseCommand):
     help = 'Entrena el ChatBot con corpus conversacionales en español'
 
     def handle(self, *args, **options):
-        # Asegúrate que la ruta a la BD sea la misma que en views.py
-        # Podrías leerla desde settings.py para evitar duplicarla
         BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         DB_PATH_COMMAND = os.path.join(BASE_DIR, 'chatbot_db.sqlite3')
 
@@ -27,6 +25,6 @@ class Command(BaseCommand):
         # Puedes añadir más corpus o tus propios archivos .yml personalizados
         trainer.train('chatterbot.corpus.spanish.greetings')
         trainer.train('chatterbot.corpus.spanish.conversations')
-        # trainer.train('ruta/a/tu/archivo_personalizado.yml')
+        trainer.train('../entrenar.py')
 
         self.stdout.write(self.style.SUCCESS('Entrenamiento completado con éxito.'))

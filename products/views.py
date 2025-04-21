@@ -1,7 +1,11 @@
 from django.shortcuts import render, get_object_or_404
+from chatbot.views import corregir_con_regex, extraer_palabras_clave, obtener_productos_desde_query
+from chatbot.views import correcciones, PALABRAS_A_IGNORAR, category_keywords,MARCAS,BUSQUEDA_TRIGGERS,detectar_intencion,INTENCIONES,PRODUCTOS,sinonimos_productos,category_keywords
 from django.core.paginator import Paginator
+from chatbot.views import extraer_palabras_clave
 from .models import Category, Product
 from django.db import models
+import re
 
 def index(request):
     """Vista de la página principal con productos destacados."""
@@ -59,24 +63,36 @@ def product_detail(request, category_slug, product_slug):
     }
     return render(request, 'products/product_detail.html', context)
 
-
 def search_products(request):
-    """Búsqueda de productos."""
-    query = request.GET.get('q', '')
-    products = []
+    query_original = request.GET.get('q', '').strip()
+    productos = []
+    mostrar_mensaje_no_encontrado = False  # Flag para controlar el mensaje
 
-    if query:
-        # Buscar por nombre, descripción o categoría
-        products = Product.objects.filter(
-            is_available=True
-        ).filter(
-            models.Q(name__icontains=query) |
-            models.Q(description__icontains=query) |
-            models.Q(category__name__icontains=query)
-        ).distinct()
+    if query_original:
+        # PASO 1: Procesar la consulta con la lógica inteligente
+        query_corregida = corregir_con_regex(query_original,
+                                             correcciones)  # Asegúrate de tener 'correcciones' accesible
+        palabras_clave = extraer_palabras_clave(
+            query_corregida)  # Asegúrate de tener 'extraer_palabras_clave' y sus dependencias accesibles
+
+        print(f"Búsqueda en página completa: Original='{query_original}', Procesada='{palabras_clave}'")
+
+        productos_encontrados, _ = obtener_productos_desde_query(palabras_clave)
+
+        productos = productos_encontrados  # Usamos los resultados de la búsqueda inteligente
+
+        if not productos.exists():  # Verificar si el queryset está vacío
+            mostrar_mensaje_no_encontrado = True  # No se encontraron productos con la lógica inteligente
+
+    else:
+        # Si la consulta original estaba vacía
+        mostrar_mensaje_no_encontrado = True
 
     context = {
-        'products': products,
-        'query': query,
+        'query': query_original,  # Mostrar la consulta original al usuario
+        'products': productos,
+        'mostrar_mensaje_no_encontrado': mostrar_mensaje_no_encontrado,
+        'categories': Category.objects.all(),
     }
+    # Asegúrate de que esta plantilla sea la que muestra la página que viste ("Resultados de búsqueda...")
     return render(request, 'products/search_results.html', context)

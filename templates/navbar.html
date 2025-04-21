@@ -29,15 +29,156 @@
             </ul>
 
             <!-- Búsqueda -->
-            <form class="d-flex my-2 my-lg-0 me-3" action="{% url 'products:search' %}" method="get">
-                <div class="input-group">
-                    <input class="form-control" type="search" name="q" placeholder="Buscar productos..." aria-label="Buscar">
-                    <button class="btn btn-primary" type="submit">
-                        <i class="fas fa-search"></i>
-                    </button>
-                </div>
-            </form>
+            <!-- Barra de búsqueda mejorada -->
+<form class="d-flex my-2 my-lg-0 me-3 position-relative" id="smartSearchForm">
+    <div class="input-group">
+        <input class="form-control" id="nav-search-input" type="search"
+               placeholder="Ej: 'teclado gaming económico'..."
+               aria-label="Buscar" autocomplete="off">
+        <button class="btn btn-primary" type="submit">
+            <i class="fas fa-search"></i>
+        </button>
+    </div>
+    <div id="smartResults" class="position-absolute bg-white shadow rounded mt-1 d-none"
+         style="width: 100%; min-width: 350px; max-height: 400px; overflow-y: auto; z-index: 1000; top: 100%;">
+        </div>
+</form>
 
+<script>
+// Asegúrate de que esta función para obtener el token CSRF esté disponible
+function getCSRFToken() {
+    const cookieValue = document.cookie.match("(^|;)\\s*csrftoken\\s*=\\s*([^;]+)");
+    return cookieValue ? cookieValue.pop() : "";
+}
+
+document.getElementById('smartSearchForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const queryInput = document.getElementById('nav-search-input');
+    const query = queryInput.value.trim();
+    const resultsContainer = document.getElementById('smartResults');
+
+    resultsContainer.innerHTML = '';
+    resultsContainer.classList.add('d-none');
+
+    if (!query) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/chatbot/search/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCSRFToken()
+            },
+            body: JSON.stringify({ query: query })
+        });
+
+        if (!response.ok) {
+            console.error('Error en la petición:', response.status, response.statusText);
+            resultsContainer.innerHTML = `<div class="p-3 text-center text-danger">Error al buscar productos.</div>`;
+            resultsContainer.classList.remove('d-none');
+            return;
+        }
+
+        const data = await response.json();
+
+        if (data.success) {
+            displaySmartResults(data.products);
+        } else {
+             console.error('La búsqueda no fue exitosa:', data.error);
+             resultsContainer.innerHTML = `<div class="p-3 text-center text-danger">La búsqueda no fue exitosa: ${data.error}</div>`;
+             resultsContainer.classList.remove('d-none');
+        }
+
+    } catch (error) {
+        console.error('Error en la petición Fetch:', error);
+        // Opcional: mostrar un mensaje de error en el dropdown
+        resultsContainer.innerHTML = `<div class="p-3 text-center text-danger">Ocurrió un error de conexión.</div>`;
+        resultsContainer.classList.remove('d-none');
+    }
+});
+
+let searchTimeout;
+document.getElementById('nav-search-input').addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        // Simular el submit del formulario para reutilizar la lógica
+        document.getElementById('smartSearchForm').dispatchEvent(new Event('submit', { cancelable: true }));
+    }, 30000);
+});
+
+
+// Función para mostrar resultados en dropdown (esta ya la tienes, la mantienes)
+function displaySmartResults(products) {
+    const container = document.getElementById('smartResults');
+    container.innerHTML = ''; // Limpiar resultados anteriores
+
+    if (!products || products.length === 0) {
+        container.innerHTML = `<div class="p-3 text-center">No encontramos productos</div>`;
+    } else {
+        products.forEach(product => {
+            // Asegurarse de que el precio sea un número antes de formatear
+            const priceFormatted = (typeof product.price === 'number') ? product.price.toLocaleString('es-CO') : product.price; // Usar localconv para Colombia
+            container.innerHTML += `
+            <a href="${product.url}" class="d-block p-2 border-bottom text-decoration-none text-dark">
+                <div class="d-flex align-items-center">
+                    <img src="${product.image}" alt="${product.name}" width="50" height="50" class="me-2 rounded">
+                    <div>
+                        <h6 class="mb-0">${product.name}</h6>
+                        <small class="text-success">$${priceFormatted}</small>
+                    </div>
+                </div>
+            </a>`;
+        });
+         // Opcional: Añadir un enlace para ver todos los resultados en la página de búsqueda estándar
+        const totalResults = products.length; // Nota: tu backend solo devuelve 5, no el total
+        if (totalResults > 0) { // O podrías poner una condición como if backend_indicates_more_results
+            const query = document.getElementById('nav-search-input').value.trim();
+            // Asegúrate de tener una URL nombrada 'products:search' en tu app products
+            const searchPageUrl = `{% url 'products:search' %}?q=${encodeURIComponent(query)}`;
+             container.innerHTML += `
+             <div class="p-2 text-center">
+                 <a href="${searchPageUrl}" class="btn btn-link btn-sm">Ver todos los resultados para "${query}"</a>
+             </div>
+             `;
+        }
+
+    }
+    // Mostrar el contenedor si hay algo que mostrar (incluso el mensaje de "No encontramos")
+     if (container.innerHTML.trim() !== '') {
+         container.classList.remove('d-none');
+     } else {
+         container.classList.add('d-none');
+     }
+}
+
+// Ocultar resultados al hacer clic fuera (esta ya la tienes, la mantienes)
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('#smartSearchForm') && !e.target.closest('#smartResults')) { // Añadido para no ocultar si se hace clic DENTRO de los resultados
+        document.getElementById('smartResults').classList.add('d-none');
+    }
+});
+
+// Opcional: Ocultar resultados al presionar ESC
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        document.getElementById('smartResults').classList.add('d-none');
+    }
+});
+
+// Opcional: Mostrar dropdown si hay texto y no está vacío al enfocar
+document.getElementById('nav-search-input').addEventListener('focus', () => {
+     const query = document.getElementById('nav-search-input').value.trim();
+     const resultsContainer = document.getElementById('smartResults');
+     // Solo mostrar si ya hay contenido en el dropdown (de una búsqueda anterior)
+     if (resultsContainer.innerHTML.trim() !== '' && query !== '') {
+         resultsContainer.classList.remove('d-none');
+     }
+});
+
+
+</script>
             <!-- Carrito y Usuario -->
             <div class="d-flex">
                 <!-- Botón del carrito -->

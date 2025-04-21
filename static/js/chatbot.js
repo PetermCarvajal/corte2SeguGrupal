@@ -132,3 +132,40 @@ document.addEventListener('DOMContentLoaded', function() {
         appendMessage('bot', '¡Hola! Soy el asistente y mascota de TecLegacy Juanjo. ¿En qué puedo ayudarte hoy? Puedes preguntarme por productos gaming o servicios privados en persona.');
     }, 500);
 });
+
+document.getElementById("nav-search-form").addEventListener("submit", async function(e) {
+    e.preventDefault();
+    const query = document.getElementById("nav-search-input").value;
+
+    if (!query.trim()) return;
+
+    // Llamada a tu backend con ChatterBot (ajustá la URL si es diferente)
+    const response = await fetch("/chatbot/", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": getCSRFToken(), // Si usás CSRF
+        },
+        body: JSON.stringify({ message: query })
+    });
+
+    const data = await response.json();
+    const mensaje = data.response; // La respuesta del bot
+
+    // Detectar los productos de la respuesta con regex (básico)
+    const palabrasClave = mensaje.match(/\b[a-zA-ZáéíóúñÁÉÍÓÚÑ0-9]{3,}\b/g);
+
+    // Redirigir al filtro de productos
+    if (palabrasClave && palabrasClave.length > 0) {
+        const searchString = palabrasClave.join("+");
+        window.location.href = `/productos/?q=${searchString}`;
+    } else {
+        alert("No se encontraron productos en la respuesta del bot.");
+    }
+
+    // Función para obtener el token CSRF si usás Django
+    function getCSRFToken() {
+        const cookieValue = document.cookie.match("(^|;)\\s*csrftoken\\s*=\\s*([^;]+)");
+        return cookieValue ? cookieValue.pop() : "";
+    }
+});
